@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.campus.payment.mapper.PaymentItemMapper">
+
+    <!--
+      学生可缴项目：PUBLISHED + 时间窗内 + 命中适用范围。
+      scope_value 为 JSON 数组，约定：
+        GRADE / COLLEGE / MAJOR 存字符串数组，如 ["2023"] / ["计算机学院"]
+        CUSTOM 存学生 id 数组（数字或字符串均可）
+    -->
+    <select id="selectAvailableList" resultType="com.campus.payment.entity.PaymentItem">
+        SELECT i.*
+        FROM payment_item i
+        WHERE i.deleted = 0
+          AND i.status = 'PUBLISHED'
+          AND i.start_time &lt;= NOW()
+          AND i.end_time &gt;= NOW()
+          AND (
+                i.target_scope = 'ALL'
+                OR (i.target_scope = 'GRADE'
+                    AND (JSON_CONTAINS(i.scope_value, JSON_QUOTE(#{grade}))
+                         OR JSON_CONTAINS(i.scope_value, CAST(#{grade} AS JSON))))
+                OR (i.target_scope = 'COLLEGE'
+                    AND JSON_CONTAINS(i.scope_value, JSON_QUOTE(#{college})))
+                OR (i.target_scope = 'MAJOR'
+                    AND JSON_CONTAINS(i.scope_value, JSON_QUOTE(#{major})))
+                OR (i.target_scope = 'CUSTOM'
+                    AND (JSON_CONTAINS(i.scope_value, CAST(#{studentId} AS JSON))
+                         OR JSON_CONTAINS(i.scope_value, JSON_QUOTE(CAST(#{studentId} AS CHAR)))))
+              )
+        ORDER BY i.end_time ASC, i.id ASC
+    </select>
+</mapper>

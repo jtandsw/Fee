@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.campus.payment.mapper.NoticeMapper">
+
+    <select id="selectVisiblePage" resultType="com.campus.payment.entity.Notice">
+        SELECT n.*
+        FROM notice n
+        WHERE n.deleted = 0
+          AND n.status = 'PUBLISHED'
+          AND n.publish_at &lt;= NOW()
+          AND (n.expire_at IS NULL OR n.expire_at &gt; NOW())
+          AND (n.target_role = #{role} OR n.target_role = 'ALL')
+        ORDER BY n.publish_at DESC, n.id DESC
+    </select>
+
+    <select id="countUnread" resultType="long">
+        SELECT COUNT(*)
+        FROM notice n
+        WHERE n.deleted = 0
+          AND n.status = 'PUBLISHED'
+          AND n.publish_at &lt;= NOW()
+          AND (n.expire_at IS NULL OR n.expire_at &gt; NOW())
+          AND (n.target_role = #{role} OR n.target_role = 'ALL')
+          AND NOT EXISTS (SELECT 1 FROM notice_read r WHERE r.notice_id = n.id AND r.user_id = #{userId})
+    </select>
+</mapper>

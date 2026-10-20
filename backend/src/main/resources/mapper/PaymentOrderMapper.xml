@@ -1,0 +1,185 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.campus.payment.mapper.PaymentOrderMapper">
+
+    <!-- 订单分页：连表取学生与项目名称，避免 N+1 -->
+    <select id="selectOrderPage" resultType="com.campus.payment.vo.OrderVO">
+        SELECT o.order_no,
+               o.item_id,
+               o.student_id,
+               o.amount,
+               o.paid_amount,
+               o.channel,
+               o.status,
+               o.transaction_no,
+               o.expire_at,
+               o.paid_at,
+               o.closed_at,
+               o.created_at,
+               i.item_no,
+               i.item_name,
+               i.category,
+               s.student_no,
+               s.college,
+               u.real_name AS student_name
+        FROM payment_order o
+                 INNER JOIN payment_item i ON i.id = o.item_id
+                 INNER JOIN student s ON s.id = o.student_id
+                 INNER JOIN sys_user u ON u.id = s.user_id
+        WHERE o.deleted = 0
+        <if test="studentId != null">
+            AND o.student_id = #{studentId}
+        </if>
+        <if test="status != null and status != ''">
+            AND o.status = #{status}
+        </if>
+        <if test="itemId != null">
+            AND o.item_id = #{itemId}
+        </if>
+        <if test="channel != null and channel != ''">
+            AND o.channel = #{channel}
+        </if>
+        <if test="keyword != null and keyword != ''">
+            AND (o.order_no LIKE CONCAT('%', #{keyword}, '%')
+                 OR o.transaction_no LIKE CONCAT('%', #{keyword}, '%')
+                 OR s.student_no LIKE CONCAT('%', #{keyword}, '%')
+                 OR u.real_name LIKE CONCAT('%', #{keyword}, '%'))
+        </if>
+        ORDER BY o.created_at DESC, o.id DESC
+    </select>
+
+    <!-- 单条订单详情（连表） -->
+    <select id="selectOrderByNo" resultType="com.campus.payment.vo.OrderVO">
+        SELECT o.order_no,
+               o.item_id,
+               o.student_id,
+               o.amount,
+               o.paid_amount,
+               o.channel,
+               o.status,
+               o.transaction_no,
+               o.expire_at,
+               o.paid_at,
+               o.closed_at,
+               o.created_at,
+               i.item_no,
+               i.item_name,
+               i.category,
+               s.student_no,
+               s.college,
+               u.real_name AS student_name
+        FROM payment_order o
+                 INNER JOIN payment_item i ON i.id = o.item_id
+                 INNER JOIN student s ON s.id = o.student_id
+                 INNER JOIN sys_user u ON u.id = s.user_id
+        WHERE o.deleted = 0
+          AND o.order_no = #{orderNo}
+    </select>
+
+    <!-- 支付回调：仅 PAYING 可迁移到 PAID，影响行数为 0 视为已处理 -->
+    <update id="markPaid">
+        UPDATE payment_order
+        SET status         = 'PAID',
+            paid_amount    = #{paidAmount},
+            transaction_no = #{transactionNo},
+            paid_at        = NOW(),
+            updated_at     = NOW()
+        WHERE order_no = #{orderNo}
+          AND status = 'PAYING'
+          AND deleted = 0
+    </update>
+
+    <update id="closeExpired">
+        UPDATE payment_order
+        SET status    = 'CLOSED',
+            closed_at = NOW(),
+            updated_at = NOW()
+        WHERE status = 'PENDING'
+          AND expire_at &lt; NOW()
+          AND deleted = 0
+    </update>
+
+    <select id="selectOverview" resultType="com.campus.payment.vo.OverviewStatVO">
+        SELECT COALESCE(SUM(CASE WHEN o.status &lt;&gt; 'CLOSED' THEN o.amount ELSE 0 END), 0)        AS receivable,
+               COALESCE(SUM(CASE WHEN o.status IN ('PAID', 'PARTIAL_REFUND') THEN o.paid_amount ELSE 0 END),
+                        0)                                                                    AS received,
+               COUNT(*)                                                                            AS order_count,
+               COALESCE(SUM(CASE WHEN o.status IN ('PAID', 'PARTIAL_REFUND') THEN 1 ELSE 0 END), 0) AS paid_count,
+               COUNT(DISTINCT o.student_id)                                                        AS student_count
+        FROM payment_order o
+        WHERE o.deleted = 0
+        <if test="itemId != null">
+            AND o.item_id = #{itemId}
+        </if>
+    </select>
+
+    <select id="selectByItem" resultType="com.campus.payment.vo.ItemStatVO">
+        SELECT i.item_no,
+               i.item_name,
+               i.category,
+               i.amount,
+               COALESCE(SUM(CASE WHEN o.status &lt;&gt; 'CLOSED' THEN o.amount ELSE 0 END), 0)        AS receivable,
+               COALESCE(SUM(CASE WHEN o.status IN ('PAID', 'PARTIAL_REFUND') THEN o.paid_amount ELSE 0 END),
+                        0)                                                                    AS received,
+               COUNT(o.id)                                                                        AS order_count,
+               COALESCE(SUM(CASE WHEN o.status IN ('PAID', 'PARTIAL_REFUND') THEN 1 ELSE 0 END), 0) AS paid_count
+        FROM payment_item i
+                 LEFT JOIN payment_order o ON o.item_id = i.id AND o.deleted = 0
+        WHERE i.deleted = 0
+        <if test="term != null and term != ''">
+            AND i.term = #{term}
+        </if>
+        GROUP BY i.id, i.item_no, i.item_name, i.category, i.amount
+        ORDER BY receivable DESC, i.id DESC
+    </select>
+
+    <select id="selectByCollege" resultType="com.campus.payment.vo.CollegeStatVO">
+        SELECT s.college,
+               COUNT(DISTINCT s.id)                                                              AS student_count,
+               COALESCE(SUM(CASE WHEN o.status &lt;&gt; 'CLOSED' THEN o.amount ELSE 0 END), 0)        AS receivable,
+               COALESCE(SUM(CASE WHEN o.status IN ('PAID', 'PARTIAL_REFUND') THEN o.paid_amount ELSE 0 END),
+                        0)                                                                      AS received
+        FROM student s
+                 LEFT JOIN payment_order o ON o.student_id = s.id AND o.deleted = 0
+        WHERE s.deleted = 0
+        GROUP BY s.college
+        ORDER BY receivable DESC
+    </select>
+
+    <select id="selectTrend" resultType="com.campus.payment.vo.TrendPointVO">
+        SELECT
+        <choose>
+            <when test="granularity == 'month'">
+                DATE_FORMAT(o.paid_at, '%Y-%m') AS stat_date,
+            </when>
+            <otherwise>
+                DATE_FORMAT(o.paid_at, '%Y-%m-%d') AS stat_date,
+            </otherwise>
+        </choose>
+        COALESCE(SUM(o.paid_amount), 0) AS amount,
+        COUNT(*) AS count
+        FROM payment_order o
+        WHERE o.deleted = 0
+          AND o.status IN ('PAID', 'PARTIAL_REFUND')
+          AND o.paid_at IS NOT NULL
+        <if test="start != null">
+            AND o.paid_at &gt;= #{start}
+        </if>
+        <if test="end != null">
+            AND o.paid_at &lt; DATE_ADD(#{end}, INTERVAL 1 DAY)
+        </if>
+        GROUP BY stat_date
+        ORDER BY stat_date ASC
+    </select>
+
+    <select id="selectPaidByChannelAndDate" resultType="com.campus.payment.entity.PaymentOrder">
+        SELECT *
+        FROM payment_order
+        WHERE deleted = 0
+          AND channel = #{channel}
+          AND status IN ('PAID', 'PARTIAL_REFUND')
+          AND paid_at IS NOT NULL
+          AND DATE(paid_at) = #{billDate}
+        ORDER BY id ASC
+    </select>
+</mapper>

@@ -1,0 +1,74 @@
+server:
+  port: 8080
+  servlet:
+    context-path: /api          # 所有接口前缀，最终访问形如 http://localhost:8080/api/v1/...
+  tomcat:
+    uri-encoding: UTF-8
+
+spring:
+  application:
+    name: campus-payment
+  profiles:
+    active: dev
+  jackson:
+    date-format: yyyy-MM-dd HH:mm:ss
+    time-zone: Asia/Shanghai
+    default-property-inclusion: non_null
+  servlet:
+    multipart:
+      max-file-size: 20MB       # 对账账单文件上传
+      max-request-size: 20MB
+
+mybatis-plus:
+  mapper-locations: classpath*:/mapper/**/*.xml
+  type-aliases-package: com.campus.payment.entity
+  configuration:
+    map-underscore-to-camel-case: true
+    log-impl: org.apache.ibatis.logging.stdout.StdOutImpl
+  global-config:
+    banner: false
+    db-config:
+      id-type: auto
+      logic-delete-field: deleted
+      logic-delete-value: 1
+      logic-not-delete-value: 0
+
+# 业务自定义配置
+jwt:
+  secret: ${JWT_SECRET:campus-payment-secret-key-please-change-in-prod-32bytes-min}
+  access-expire-seconds: 7200      # 访问令牌 2 小时
+  refresh-expire-seconds: 604800   # 刷新令牌 7 天
+
+payment:
+  order-expire-minutes: 30         # 未支付订单超时时间
+  default-channel: MOCK            # MVP 默认模拟支付渠道
+  wechat:
+    app-id: ${WX_APP_ID:}
+    mch-id: ${WX_MCH_ID:}
+    api-key: ${WX_API_KEY:}
+    notify-url: ${WX_NOTIFY_URL:http://localhost:8080/api/v1/pay/callback/wechat}
+
+app:
+  frontend-base-url: ${FRONTEND_BASE_URL:http://localhost:5173}
+  upload-dir: ${UPLOAD_DIR:./uploads}
+  cors:
+    allowed-origins: ${CORS_ALLOWED_ORIGINS:http://localhost:5173,http://127.0.0.1:5173}
+
+springdoc:
+  swagger-ui:
+    path: /swagger-ui.html
+  api-docs:
+    path: /v3/api-docs
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
+  endpoint:
+    health:
+      show-details: always
+
+logging:
+  level:
+    com.campus.payment: debug

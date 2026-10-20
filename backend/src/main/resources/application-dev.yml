@@ -1,0 +1,26 @@
+spring:
+  # 可选加载本地私有配置（不入库），用于放本机数据库口令等敏感项
+  config:
+    import: optional:classpath:application-local.yml
+  datasource:
+    driver-class-name: com.mysql.cj.jdbc.Driver
+    url: ${DB_URL:jdbc:mysql://localhost:3306/campus_payment?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai&useSSL=false&allowPublicKeyRetrieval=true&rewriteBatchedStatements=true}
+    username: ${DB_USERNAME:root}
+    # 口令不写死：优先取环境变量 DB_PASSWORD，其次取 application-local.yml
+    password: ${DB_PASSWORD:}
+    hikari:
+      minimum-idle: 5
+      maximum-pool-size: 20
+      connection-timeout: 30000
+      idle-timeout: 600000
+      max-lifetime: 1800000
+  # 开发环境自动执行初始化脚本会 DROP 数据库，默认关闭；需要时改为 always（见 README 7.5 方式 B）
+  sql:
+    init:
+      mode: never
+  # Redis 可选，未部署则保持注释
+  # data:
+  #   redis:
+  #     host: localhost
+  #     port: 6379
+  #     database: 0
