@@ -1,0 +1,47 @@
+# ---- Java / Maven ----
+backend/target/
+*.class
+*.jar
+!backend/.mvn/wrapper/maven-wrapper.jar
+
+# ---- Node / 前端 ----
+frontend/node_modules/
+frontend/dist/
+frontend/.vite/
+npm-debug.log*
+pnpm-debug.log*
+yarn-error.log*
+
+# ---- 运行期产物 ----
+uploads/
+logs/
+*.log
+backend/uploads/
+
+# ---- IDE ----
+.idea/
+*.iml
+.vscode/
+*.swp
+
+# ---- 系统 ----
+.DS_Store
+Thumbs.db
+
+# ---- 文档生成中间产物（成品已归档到 docs/）----
+output/
+.tmp/
+
+# ---- 工具/会话数据 ----
+.workbuddy/
+
+# ---- Office 临时锁文件 ----
+~$*
+
+# ---- 本地环境变量（含数据库口令、JWT 密钥，切勿提交）----
+.env.local
+.env.*.local
+*.local.yml
+application-local.yml
+*-local.yml
+!application-local.yml.example
