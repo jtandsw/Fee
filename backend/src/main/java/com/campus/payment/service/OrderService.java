@@ -19,9 +19,19 @@ public interface OrderService {
 
     OrderVO detail(String orderNo);
 
-    PayVO pay(String orderNo);
+    /**
+     * 发起支付。
+     *
+     * @param channel 学生在收银台选择的支付渠道，为空时沿用下单时记录的渠道
+     */
+    PayVO pay(String orderNo, String channel);
 
     void close(String orderNo);
+
+    /**
+     * 收银台可选支付渠道（含未接入渠道，便于前端展示禁用态）。
+     */
+    java.util.List<com.campus.payment.vo.ChannelVO> channels();
 
     RefundVO refund(String orderNo, RefundCreateDTO dto);
 

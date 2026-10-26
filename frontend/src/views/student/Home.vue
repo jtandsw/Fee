@@ -56,8 +56,8 @@
           </div>
           <div class="item-action">
             <MoneyText :amount="item.payStatus === 'PARTIAL' ? item.remainAmount : item.amount" />
-            <el-button size="small" type="primary" :loading="payingId === item.id" @click="pay(item)">
-              {{ item.payStatus === 'PARTIAL' ? '缴剩余' : '去缴费' }}
+            <el-button size="small" type="primary" :loading="payingId === item.id" @click="startPay(item)">
+              {{ item.payStatus === 'PARTIAL' ? '继续缴纳' : '去缴费' }}
             </el-button>
           </div>
         </div>
@@ -79,6 +79,13 @@
     <el-dialog v-model="noticeVisible" :title="activeNotice?.title" width="560px">
       <div class="notice-content">{{ activeNotice?.content }}</div>
     </el-dialog>
+
+    <PartialPayDialog
+      v-model="dialogVisible"
+      :item="dialogItem"
+      :loading="submitting"
+      @confirm="submitFromDialog"
+    />
   </div>
 </template>
 
@@ -87,16 +94,18 @@ import { onActivated, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import MoneyText from '@/components/MoneyText.vue'
+import PartialPayDialog from '@/components/PartialPayDialog.vue'
+import { useItemPayment } from '@/composables/useItemPayment'
 import { useUserStore } from '@/stores/user'
 import * as itemApi from '@/api/item'
 import * as orderApi from '@/api/order'
 import * as noticeApi from '@/api/notice'
 import { formatAmount, formatDateTime } from '@/utils/format'
-import { newIdempotencyKey } from '@/utils/idempotency'
 import type { Notice, PaymentItem } from '@/types'
 
 const router = useRouter()
 const userStore = useUserStore()
+const { payingId, dialogVisible, dialogItem, submitting, startPay, submitFromDialog } = useItemPayment()
 
 const loading = ref(false)
 const items = ref<PaymentItem[]>([])
@@ -106,7 +115,6 @@ const paidItemTotal = ref(0)
 const pendingTotal = ref(0)
 const paidTotal = ref(0)
 const unread = ref(0)
-const payingId = ref<number | null>(null)
 const noticeVisible = ref(false)
 const activeNotice = ref<Notice | null>(null)
 
@@ -132,16 +140,6 @@ async function load(): Promise<void> {
     unread.value = unreadCount
   } finally {
     loading.value = false
-  }
-}
-
-async function pay(item: PaymentItem): Promise<void> {
-  payingId.value = item.id
-  try {
-    const order = await orderApi.createOrder({ itemId: item.id, channel: 'MOCK' }, newIdempotencyKey())
-    await router.push({ path: '/student/cashier', query: { orderNo: order.orderNo } })
-  } finally {
-    payingId.value = null
   }
 }
 

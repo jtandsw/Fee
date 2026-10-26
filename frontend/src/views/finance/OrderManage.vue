@@ -2,12 +2,10 @@
   <div class="page">
     <div class="card">
       <div class="toolbar">
-        <el-input v-model="query.keyword" placeholder="订单号 / 学号 / 姓名 / 流水号" clearable style="width: 260px" @keyup.enter="search" />
+        <el-input v-model="query.studentNo" placeholder="学号" clearable style="width: 150px" @keyup.enter="search" />
+        <el-input v-model="query.keyword" placeholder="订单号 / 姓名 / 流水号" clearable style="width: 230px" @keyup.enter="search" />
         <el-select v-model="query.status" placeholder="全部状态" clearable style="width: 140px" @change="search">
           <el-option v-for="(meta, key) in ORDER_STATUS" :key="key" :label="meta.label" :value="key" />
-        </el-select>
-        <el-select v-model="query.channel" placeholder="全部渠道" clearable style="width: 140px" @change="search">
-          <el-option v-for="(label, key) in CHANNEL_LABEL" :key="key" :label="label" :value="key" />
         </el-select>
         <el-button type="primary" @click="search">查询</el-button>
         <el-button @click="reset">重置</el-button>
@@ -16,7 +14,7 @@
 
     <div class="card">
       <el-table v-loading="loading" :data="list" empty-text="暂无订单" stripe>
-        <el-table-column prop="orderNo" label="订单号" min-width="185" />
+        <el-table-column prop="orderNo" label="订单号" min-width="215" />
         <el-table-column label="学生" width="140">
           <template #default="{ row }">
             <div>{{ row.studentName }}</div>
@@ -39,13 +37,12 @@
         <el-table-column label="创建时间" width="170">
           <template #default="{ row }">{{ formatDateTime(row.createdAt) }}</template>
         </el-table-column>
-        <el-table-column label="操作" width="200" fixed="right">
+        <el-table-column label="操作" width="150" fixed="right">
           <template #default="{ row }">
             <el-button link @click="showDetail(row as Order)">详情</el-button>
             <el-button v-if="row.status === 'PAID' || row.status === 'PARTIAL_REFUND'" link type="warning" @click="openRefund(row as Order)">
               退款
             </el-button>
-            <el-button v-if="row.status === 'PENDING'" link type="danger" @click="close(row as Order)">关闭</el-button>
             <el-button v-if="row.status === 'PAID'" link type="primary" @click="voucher(row as Order)">凭证</el-button>
           </template>
         </el-table-column>
@@ -114,7 +111,7 @@
 
 <script setup lang="ts">
 import { onMounted, reactive, ref } from 'vue'
-import { ElMessage, ElMessageBox } from 'element-plus'
+import { ElMessage } from 'element-plus'
 import MoneyText from '@/components/MoneyText.vue'
 import StatusTag from '@/components/StatusTag.vue'
 import * as orderApi from '@/api/order'
@@ -134,9 +131,9 @@ const refundTarget = ref<Order | null>(null)
 const refundForm = reactive({ amount: '', reason: '' })
 
 const query = reactive({
+  studentNo: '',
   keyword: '',
   status: '',
-  channel: '',
   pageNum: 1,
   pageSize: 10
 })
@@ -147,9 +144,9 @@ async function load(): Promise<void> {
     const page = await orderApi.pageOrders({
       pageNum: query.pageNum,
       pageSize: query.pageSize,
+      studentNo: query.studentNo.trim() || undefined,
       keyword: query.keyword || undefined,
-      status: query.status || undefined,
-      channel: query.channel || undefined
+      status: query.status || undefined
     })
     list.value = page.list
     total.value = page.total
@@ -164,9 +161,9 @@ function search(): void {
 }
 
 function reset(): void {
+  query.studentNo = ''
   query.keyword = ''
   query.status = ''
-  query.channel = ''
   query.pageNum = 1
   load()
 }
@@ -174,17 +171,6 @@ function reset(): void {
 function showDetail(row: Order): void {
   activeOrder.value = row
   detailVisible.value = true
-}
-
-async function close(row: Order): Promise<void> {
-  try {
-    await ElMessageBox.confirm(`确定关闭订单 ${row.orderNo} 吗？`, '提示', { type: 'warning' })
-  } catch {
-    return
-  }
-  await orderApi.closeOrder(row.orderNo)
-  ElMessage.success('订单已关闭')
-  load()
 }
 
 function openRefund(row: Order): void {

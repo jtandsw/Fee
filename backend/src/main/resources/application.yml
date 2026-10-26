@@ -41,12 +41,7 @@ jwt:
 
 payment:
   order-expire-minutes: 30         # 未支付订单超时时间
-  default-channel: MOCK            # MVP 默认模拟支付渠道
-  wechat:
-    app-id: ${WX_APP_ID:}
-    mch-id: ${WX_MCH_ID:}
-    api-key: ${WX_API_KEY:}
-    notify-url: ${WX_NOTIFY_URL:http://localhost:8080/api/v1/pay/callback/wechat}
+  default-channel: MOCK            # 当前仅实现模拟支付渠道
 
 app:
   frontend-base-url: ${FRONTEND_BASE_URL:http://localhost:5173}

@@ -14,4 +14,7 @@ public class OrderCreateVO {
     private String status;
     private LocalDateTime expireAt;
     private String payUrl;
+
+    @Schema(description = "是否复用了本人该项目的未支付订单（true 表示本次没有新建订单）")
+    private boolean reused;
 }

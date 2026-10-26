@@ -7,6 +7,7 @@ import com.campus.payment.common.PageResult;
 import com.campus.payment.common.ResultCode;
 import com.campus.payment.common.constant.ItemStatus;
 import com.campus.payment.common.constant.OrderStatus;
+import com.campus.payment.common.constant.PayChannel;
 import com.campus.payment.config.AppProperties;
 import com.campus.payment.config.PaymentProperties;
 import com.campus.payment.dto.OrderCreateDTO;
@@ -27,6 +28,7 @@ import com.campus.payment.security.SecurityUtils;
 import com.campus.payment.service.OrderService;
 import com.campus.payment.util.NoGenerator;
 import com.campus.payment.util.ScopeUtils;
+import com.campus.payment.vo.ChannelVO;
 import com.campus.payment.vo.OrderCreateVO;
 import com.campus.payment.vo.OrderVO;
 import com.campus.payment.vo.PayVO;
@@ -40,7 +42,10 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
 
 import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.time.LocalDateTime;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Map;
 
 @Slf4j
@@ -75,7 +80,7 @@ public class OrderServiceImpl implements OrderService {
             if (!existing.getStudentId().equals(student.getId())) {
                 throw new BusinessException(ResultCode.FORBIDDEN_DATA);
             }
-            return toCreateVO(existing);
+            return toCreateVO(existing, true);
         }
 
         PaymentItem item = itemMapper.selectById(dto.getItemId());
@@ -94,12 +99,13 @@ public class OrderServiceImpl implements OrderService {
         }
 
         BigDecimal paid = orderMapper.sumPaidAmount(student.getId(), item.getId());
-        BigDecimal remaining = item.getAmount().subtract(paid);
+        BigDecimal remaining = item.getAmount().subtract(paid).setScale(2, RoundingMode.HALF_UP);
         if (remaining.compareTo(BigDecimal.ZERO) <= 0) {
             throw new BusinessException(ResultCode.ALREADY_PAID);
         }
+        BigDecimal amount = resolvePayAmount(item, dto.getAmount(), remaining);
 
-        // 已有未过期的待支付订单则直接复用，避免同一项目重复挂单
+        // 已有未过期的待支付订单：金额一致则复用，金额变了则作废旧单再建，避免同时挂两张金额不同的单
         PaymentOrder pending = orderMapper.selectOne(Wrappers.<PaymentOrder>lambdaQuery()
                 .eq(PaymentOrder::getStudentId, student.getId())
                 .eq(PaymentOrder::getItemId, item.getId())
@@ -108,17 +114,24 @@ public class OrderServiceImpl implements OrderService {
                 .orderByDesc(PaymentOrder::getId)
                 .last("LIMIT 1"));
         if (pending != null) {
-            return toCreateVO(pending);
+            if (pending.getAmount().compareTo(amount) == 0) {
+                return toCreateVO(pending, true);
+            }
+            if (OrderStatus.PAYING.name().equals(pending.getStatus())) {
+                throw new BusinessException(ResultCode.ORDER_STATUS_INVALID,
+                        "该项目有一笔正在支付中的订单，请稍后再试");
+            }
+            orderMapper.update(null, Wrappers.<PaymentOrder>lambdaUpdate()
+                    .eq(PaymentOrder::getId, pending.getId())
+                    .eq(PaymentOrder::getStatus, OrderStatus.PENDING.name())
+                    .set(PaymentOrder::getStatus, OrderStatus.CLOSED.name())
+                    .set(PaymentOrder::getClosedAt, now));
         }
 
         String channel = StringUtils.hasText(dto.getChannel()) ? dto.getChannel() : paymentProperties.getDefaultChannel();
         if (!channelRegistry.supports(channel)) {
             throw new BusinessException(ResultCode.PARAM_INVALID, "不支持的支付渠道：" + channel);
         }
-
-        // 应收金额 = 剩余应缴。不能用 allowPartial 决定「全额 or 剩余」：
-        // 部分退款后 allowPartial=0 的项目同样存在缺口，按全额收会造成超额收费。
-        BigDecimal amount = remaining;
 
         PaymentOrder order = new PaymentOrder();
         order.setOrderNo(NoGenerator.orderNo());
@@ -141,9 +154,9 @@ public class OrderServiceImpl implements OrderService {
             if (duplicated == null) {
                 throw new BusinessException(ResultCode.DATA_CONFLICT, "订单创建冲突，请重试");
             }
-            return toCreateVO(duplicated);
+            return toCreateVO(duplicated, true);
         }
-        return toCreateVO(order);
+        return toCreateVO(order, false);
     }
 
     @Override
@@ -156,7 +169,8 @@ public class OrderServiceImpl implements OrderService {
             }
         }
         IPage<OrderVO> page = orderMapper.selectOrderPage(query.toPage(), studentId,
-                query.getStatus(), query.getItemId(), query.getChannel(), query.getKeyword());
+                query.getStatus(), query.getItemId(), query.getChannel(),
+                query.getStudentNo(), query.getKeyword());
         return PageResult.of(page);
     }
 
@@ -172,7 +186,7 @@ public class OrderServiceImpl implements OrderService {
 
     @Override
     @Transactional(rollbackFor = Exception.class)
-    public PayVO pay(String orderNo) {
+    public PayVO pay(String orderNo, String channel) {
         PaymentOrder order = requireOrder(orderNo);
         LoginUser user = SecurityUtils.getCurrentUser();
         if (!user.isStudent()) {
@@ -183,6 +197,19 @@ public class OrderServiceImpl implements OrderService {
         }
         if (!OrderStatus.PENDING.name().equals(order.getStatus())) {
             throw new BusinessException(ResultCode.ORDER_STATUS_INVALID);
+        }
+        // 收银台选择的渠道在此落库：下单时可能用默认值，以支付时的选择为准
+        if (StringUtils.hasText(channel)) {
+            PayChannel selected = PayChannel.of(channel.trim());
+            if (selected == null) {
+                throw new BusinessException(ResultCode.PARAM_INVALID, "不支持的支付渠道：" + channel);
+            }
+            if (!selected.name().equalsIgnoreCase(order.getChannel())) {
+                orderMapper.update(null, Wrappers.<PaymentOrder>lambdaUpdate()
+                        .eq(PaymentOrder::getId, order.getId())
+                        .set(PaymentOrder::getChannel, selected.name()));
+                order.setChannel(selected.name());
+            }
         }
         if (order.getExpireAt() != null && order.getExpireAt().isBefore(LocalDateTime.now())) {
             int closed = orderMapper.update(null, Wrappers.<PaymentOrder>lambdaUpdate()
@@ -204,6 +231,25 @@ public class OrderServiceImpl implements OrderService {
         order.setStatus(OrderStatus.PAYING.name());
         PaymentChannelAdapter adapter = channelRegistry.get(order.getChannel());
         return adapter.createPayment(order);
+    }
+
+    @Override
+    public List<ChannelVO> channels() {
+        // 只返回已注册适配器的渠道：没有实现的渠道不进入候选列表，
+        // 前端因此不会渲染「未接入」的占位项。新增渠道只需实现 PaymentChannelAdapter。
+        List<ChannelVO> list = new ArrayList<>();
+        for (PayChannel channel : PayChannel.values()) {
+            if (channelRegistry.supports(channel.name())) {
+                list.add(new ChannelVO(channel.name(), channelLabel(channel), true, null));
+            }
+        }
+        return list;
+    }
+
+    private String channelLabel(PayChannel channel) {
+        return switch (channel) {
+            case MOCK -> "模拟支付";
+        };
     }
 
     @Override
@@ -396,14 +442,43 @@ public class OrderServiceImpl implements OrderService {
         return student;
     }
 
-    private OrderCreateVO toCreateVO(PaymentOrder order) {
+    private OrderCreateVO toCreateVO(PaymentOrder order, boolean reused) {
         OrderCreateVO vo = new OrderCreateVO();
         vo.setOrderNo(order.getOrderNo());
         vo.setAmount(order.getAmount());
         vo.setStatus(order.getStatus());
         vo.setExpireAt(order.getExpireAt());
+        vo.setReused(reused);
         vo.setPayUrl(appProperties.getFrontendBaseUrl() + "/student/cashier?orderNo=" + order.getOrderNo());
         return vo;
+    }
+
+    /**
+     * 计算本次应缴金额。
+     * <p>
+     * allowPartial=1 的项目允许只缴一部分（退款后补缴同样走这里），由学生指定；
+     * 其余项目一律按剩余应缴全额收取，传了别的金额直接拒绝，避免「以为只交了一部分、实际欠费」。
+     */
+    private BigDecimal resolvePayAmount(PaymentItem item, BigDecimal requested, BigDecimal remaining) {
+        if (requested == null) {
+            return remaining;
+        }
+        BigDecimal amount = requested.setScale(2, RoundingMode.HALF_UP);
+        if (!Integer.valueOf(1).equals(item.getAllowPartial())) {
+            if (amount.compareTo(remaining) != 0) {
+                throw new BusinessException(ResultCode.PARAM_INVALID,
+                        "该项目不支持分次缴纳，本次需缴清剩余 " + remaining.toPlainString() + " 元");
+            }
+            return remaining;
+        }
+        if (amount.compareTo(new BigDecimal("0.01")) < 0) {
+            throw new BusinessException(ResultCode.PARAM_INVALID, "本次缴纳金额不能小于 0.01 元");
+        }
+        if (amount.compareTo(remaining) > 0) {
+            throw new BusinessException(ResultCode.PARAM_INVALID,
+                    "本次缴纳金额不能超过剩余应缴 " + remaining.toPlainString() + " 元");
+        }
+        return amount;
     }
 
     private String escape(String value) {

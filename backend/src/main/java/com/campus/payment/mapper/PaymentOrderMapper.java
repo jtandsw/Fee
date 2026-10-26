@@ -27,6 +27,7 @@ public interface PaymentOrderMapper extends BaseMapper<PaymentOrder> {
                                    @Param("status") String status,
                                    @Param("itemId") Long itemId,
                                    @Param("channel") String channel,
+                                   @Param("studentNo") String studentNo,
                                    @Param("keyword") String keyword);
 
     /** 单条订单详情（连表） */
@@ -88,4 +89,24 @@ public interface PaymentOrderMapper extends BaseMapper<PaymentOrder> {
     /** 对账：按渠道与账单日期取本地已支付订单 */
     List<PaymentOrder> selectPaidByChannelAndDate(@Param("channel") String channel,
                                                   @Param("billDate") LocalDate billDate);
+
+    /** 项目下架影响：已支付订单笔数（含部分退款） */
+    @Select("SELECT COUNT(*) FROM payment_order "
+            + "WHERE deleted = 0 AND item_id = #{itemId} AND status IN ('PAID', 'PARTIAL_REFUND')")
+    int countPaidOrders(@Param("itemId") Long itemId);
+
+    /** 项目下架影响：已缴费学生人数 */
+    @Select("SELECT COUNT(DISTINCT student_id) FROM payment_order "
+            + "WHERE deleted = 0 AND item_id = #{itemId} AND status IN ('PAID', 'PARTIAL_REFUND')")
+    int countPaidStudents(@Param("itemId") Long itemId);
+
+    /** 项目下架影响：已收金额合计（退款不回冲 paid_amount，此处按已支付口径） */
+    @Select("SELECT COALESCE(SUM(paid_amount), 0) FROM payment_order "
+            + "WHERE deleted = 0 AND item_id = #{itemId} AND status IN ('PAID', 'PARTIAL_REFUND')")
+    BigDecimal sumPaidByItem(@Param("itemId") Long itemId);
+
+    /** 项目下架影响：待支付与支付中的订单数，这类订单下架后仍可继续支付 */
+    @Select("SELECT COUNT(*) FROM payment_order "
+            + "WHERE deleted = 0 AND item_id = #{itemId} AND status IN ('PENDING', 'PAYING')")
+    int countUnfinishedOrders(@Param("itemId") Long itemId);
 }

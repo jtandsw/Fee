@@ -12,7 +12,7 @@ import java.util.Map;
  */
 public interface PaymentChannelAdapter {
 
-    /** 渠道标识，如 MOCK / WECHAT */
+    /** 渠道标识，需与 {@link com.campus.payment.common.constant.PayChannel} 枚举值一致 */
     String channel();
 
     /** 发起支付，返回收银台地址或渠道支付参数 */

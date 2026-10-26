@@ -48,12 +48,9 @@ export const CATEGORY_LABEL: Record<string, string> = {
   OTHER: '其他'
 }
 
+// 与后端 PayChannel 保持一致：目前只实现模拟支付，接入新渠道时两边同步增加
 export const CHANNEL_LABEL: Record<string, string> = {
-  MOCK: '模拟支付',
-  WECHAT: '微信支付',
-  ALIPAY: '支付宝',
-  UNIONPAY: '银联',
-  CASH: '现金'
+  MOCK: '模拟支付'
 }
 
 export const TARGET_SCOPE_LABEL: Record<string, string> = {
@@ -61,5 +58,6 @@ export const TARGET_SCOPE_LABEL: Record<string, string> = {
   GRADE: '年级',
   COLLEGE: '学院',
   MAJOR: '专业',
-  CUSTOM: '指定名单'
+  CUSTOM: '指定名单',
+  COMPOSITE: '条件范围'
 }

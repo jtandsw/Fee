@@ -15,14 +15,4 @@ public class PaymentProperties {
 
     /** 默认支付渠道 */
     private String defaultChannel = "MOCK";
-
-    private Wechat wechat = new Wechat();
-
-    @Data
-    public static class Wechat {
-        private String appId;
-        private String mchId;
-        private String apiKey;
-        private String notifyUrl;
-    }
 }

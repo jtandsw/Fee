@@ -39,6 +39,10 @@
         <if test="channel != null and channel != ''">
             AND o.channel = #{channel}
         </if>
+        <!-- 学号筛选：财务按学生查订单 -->
+        <if test="studentNo != null and studentNo != ''">
+            AND s.student_no LIKE CONCAT('%', #{studentNo}, '%')
+        </if>
         <if test="keyword != null and keyword != ''">
             AND (o.order_no LIKE CONCAT('%', #{keyword}, '%')
                  OR o.transaction_no LIKE CONCAT('%', #{keyword}, '%')
