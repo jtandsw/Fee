@@ -1065,11 +1065,15 @@ logging:
 
 ```yaml
 spring:
+  # 可选加载本地私有配置（不入库），用于放本机数据库口令等敏感项
+  config:
+    import: optional:classpath:application-local.yml
   datasource:
     driver-class-name: com.mysql.cj.jdbc.Driver
     url: jdbc:mysql://localhost:3306/campus_payment?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai&useSSL=false&allowPublicKeyRetrieval=true&rewriteBatchedStatements=true
     username: ${DB_USERNAME:root}
-    password: ${DB_PASSWORD:123456}
+    # 口令不写死：优先取环境变量 DB_PASSWORD，其次取 application-local.yml
+    password: ${DB_PASSWORD:}
     hikari:
       minimum-idle: 5
       maximum-pool-size: 20
@@ -1132,6 +1136,47 @@ curl http://localhost:8080/api/actuator/health
 > ```powershell
 > curl.exe http://localhost:8080/api/actuator/health
 > ```
+
+### 8.4 在 IntelliJ IDEA 中启动后端
+
+前置：IDEA 2023.1+，`File → Project Structure → Project` 的 SDK 选 **JDK 17**（`backend/pom.xml` 的 `java.version` 为 17）。
+
+1. **打开项目**：`File → Open` 选择 `backend/pom.xml` → **Open as Project**，只加载后端模块，索引最快。若希望前后端在同一个窗口，则直接打开仓库根目录 `软件实训`。
+2. **等待 Maven 依赖**：右下角进度条结束。已把依赖下载到本地仓库的环境，可在 `Settings → Build, Execution, Deployment → Build Tools → Maven` 勾选 **Work offline** 加速。
+3. **运行主类**：打开 `backend/src/main/java/com/campus/payment/PaymentApplication.java`，点击 `main` 方法左侧绿色三角 → **Run 'PaymentApplication'**。IDEA 会自动生成名为 `PaymentApplication` 的运行配置，**不需要手填端口、profile**（`spring.profiles.active=dev` 已在 `application.yml` 中写死）。
+4. **确认启动**：控制台出现 `Tomcat started on port 8080 (http) with context path '/api'` 与 `Started PaymentApplication in x seconds` 即成功。
+
+**数据库口令从哪来**
+
+`application-dev.yml` 通过 `spring.config.import: optional:classpath:application-local.yml` 读取本机口令，而该文件被 `.gitignore` 忽略、**不会随仓库分发**。新克隆代码后若直接启动会报 `Access denied`，二选一补上：
+
+```bash
+# 方式一：从仓库内的模板复制后填入真实口令
+cd backend/src/main/resources
+cp application-local.yml.example application-local.yml
+```
+
+```yaml
+# application-local.yml 内容
+spring:
+  datasource:
+    password: 你的MySQL口令
+```
+
+或在 IDEA 运行配置的 **Environment variables** 中填 `DB_PASSWORD=你的MySQL口令`（环境变量优先级高于 local 文件，适合不想把口令落盘）。
+
+**常见问题**
+
+| 现象 | 原因与处理 |
+|---|---|
+| `Access denied for user 'root'@'localhost' (using password: NO)` | **口令没拿到**，不是口令错。补 `application-local.yml`（可复制 `application-local.yml.example`）或设 `DB_PASSWORD` |
+| `Access denied for user 'root'@'localhost' (using password: YES)` | 口令拿到了但不对，检查 `application-local.yml` 里填的值 |
+| `Port 8080 was already in use` | 已有实例在跑。`Run → Edit Configurations → Program arguments` 加 `--server.port=8081`，同时把前端 `VITE_PROXY_TARGET` 指向 8081 |
+| Lombok 注解不生效 / `cannot find symbol getXxx()` | 确认 `Settings → Build Tools → Compiler → Annotation Processors` 勾选 **Enable annotation processing** |
+| 控制台中文乱码 | `Help → Edit Custom VM Options` 追加 `-Dfile.encoding=UTF-8`，运行配置的 VM options 也加同一行 |
+| `Unsupported class file major version` | Project SDK 用了过高版本，改回 JDK 17（本项目 `release=17`） |
+
+接口文档：启动后访问 http://localhost:8080/api/swagger-ui.html
 
 ---
 
@@ -1218,6 +1263,25 @@ npm install -g pnpm
 pnpm install
 pnpm dev
 ```
+
+### 9.4 在 IntelliJ IDEA 中启动前端
+
+1. **确认 Node 解释器**：`File → Settings → Languages & Frameworks → Node.js`，选择 Node 18+（本机 `node -v` 应为 v22.x 或 v20.x）。
+2. **首次安装依赖**：在 `frontend/package.json` 上右键 → **Run 'npm install'**，或终端执行 `npm install`。`node_modules` 也已随 `.gitignore` 排除，新克隆必须装一次。
+3. **运行 dev 脚本**：打开 `frontend/package.json`，在 `scripts` 里 `dev` 左侧点击绿色三角 → **Run 'dev'**。IDEA 自动生成的 npm 配置中，**Package manager** 为 npm、**Command** 为 `run`、**Scripts** 为 `dev`、**Working directory** 为 `frontend`，不要改。
+4. **访问**：浏览器打开 http://localhost:5173 。页面请求走相对路径 `/api`，由 Vite 的 `server.proxy` 转发到 `http://localhost:8080`，因此**前端不需要配置跨域，也不需要改接口地址**。
+
+**后端不在 8080 时**
+
+在 `frontend/.env.development.local` 中覆盖代理目标（该文件不入库）：
+
+```
+VITE_PROXY_TARGET=http://localhost:8081
+```
+
+**一键同时起两个服务**
+
+`Run → Edit Configurations` → 左上 `+` → **Compound** → 名称填 `dev-all`，把 `PaymentApplication` 与 `dev` 两个配置加入列表。之后选中 `dev-all` 启动，前后端同时拉起，Debug 也可整体挂断点。
 
 ---
 
