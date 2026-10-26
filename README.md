@@ -41,7 +41,7 @@
 **系统定位**
 
 - 单校/多校区均可部署的**单体应用**（前后端分离），不依赖微服务中间件；
-- 支付渠道层做**适配器抽象**（`PaymentChannelAdapter`），MVP 阶段内置「模拟支付 + 微信/支付宝沙箱」，后续接真实商户号不改业务代码；
+- 支付渠道层做**适配器抽象**（`PaymentChannelAdapter`），当前只实现「模拟支付」一个渠道：不依赖真实商户号即可完整跑通下单、支付、回调、退款；将来接入微信/支付宝时新增一个适配器实现即可，订单与退款代码不动；
 - 金额一律 `DECIMAL(10,2)` / Java `BigDecimal`，**禁止 float/double**。
 
 **非目标（MVP 不做）**
@@ -69,19 +69,23 @@
 | 功能 | 学生 | 财务 | 管理员 |
 |---|:--:|:--:|:--:|
 | 登录 / 修改本人密码 | ✅ | ✅ | ✅ |
-| 查看可缴项目列表 | ✅ 仅本人适用 | ✅ 全部 | ✅ 全部 |
-| 新建 / 编辑 / 发布 / 下架缴费项目 | ❌ | ✅ | ✅ |
+| 查看可缴项目列表 | ✅ 仅本人适用 | ✅ 全部 | ❌ |
+| 新建 / 编辑 / 发布 / 下架缴费项目 | ❌ | ✅ | ❌ |
 | 创建订单、发起支付 | ✅ 仅本人 | ❌ | ❌ |
-| 查看订单 / 缴费记录 | ✅ 仅本人 | ✅ 全部 | ✅ 全部 |
-| 关闭未支付订单 | ✅ 仅本人 | ✅ 全部 | ✅ 全部 |
-| 退款申请与审核 | ❌ | ✅ | ✅ |
-| 对账批次创建 / 差异处理 | ❌ | ✅ | ✅ |
-| 统计报表查看 / 导出 | ❌ | ✅ | ✅ |
-| 通知发布 | ❌ | ✅ | ✅ |
-| 学生名单导入 | ❌ | ✅ | ✅ |
+| 查看订单 / 缴费记录 | ✅ 仅本人 | ✅ 全部 | ❌ |
+| 关闭未支付订单 | ✅ 仅本人 | ❌ | ❌ |
+| 退款申请与审核 | ❌ | ✅ | ❌ |
+| 对账批次创建 / 差异处理 | ❌ | ✅ | ❌ |
+| 统计报表查看 / 导出 | ❌ | ✅ | ❌ |
+| 通知发布 | ❌ | ✅ | ❌ |
+| 通知接收 | ✅ | ✅ | ✅ |
+| 学生名单导入 | ❌ | ❌ | ✅ |
 | 用户增删改、重置密码、启禁用 | ❌ | ❌ | ✅ |
 | 系统参数 / 数据字典维护 | ❌ | ❌ | ✅ |
+| 系统运行信息查看 | ❌ | ❌ | ✅ |
 | 操作日志审计 | ❌ | ❌ | ✅ |
+
+> **职责边界**：财务负责"钱"相关的全部事务（项目、订单、退款、对账、报表、通知）；管理员只负责"系统"层面的事务（账号、字典、参数、审计），**不参与也不查看任何财务业务数据**。管理员的默认落地页是"操作日志"，侧边栏不出现任何财务入口。
 
 ### 2.3 数据权限（行级）
 
@@ -124,10 +128,10 @@ if (Role.STUDENT.equals(currentUser.getRole())) {
 | 项目编号 `item_no` | 全局唯一，格式 `{类别码}{年份}{4位序号}`，如 `TX20260001` |
 | 缴费类别 | `TUITION` 学费 / `ACCOMMODATION` 住宿费 / `BOOK` 教材费 / `EXAM` 考试费 / `OTHER` |
 | 金额 | `DECIMAL(10,2)`，> 0，上限 99,999,999.99 |
-| 适用范围 | `ALL` 全校 / `GRADE` 年级 / `COLLEGE` 学院 / `MAJOR` 专业 / `CUSTOM` 指定名单，值存 JSON 数组 |
+| 适用范围 | **多维度组合条件**：年级 / 学院 / 专业 / 指定学生可任意组合，非空维度之间取**交集**（如「2023 级 + 计算机学院 + 软件工程」），全部留空 = 全校。字段 `target_scope='COMPOSITE'`，`scope_value` 存 `{"grades":[],"colleges":[],"majors":[],"studentIds":[]}`；历史单维度格式（`GRADE`/`COLLEGE`/`MAJOR`/`CUSTOM` + 数组）仍兼容读取。**选项一律由下拉框从学籍档案现存值带出**（`GET /v1/payment-items/scope-options`、`/scope-students`），不可手填；发布前可用 `POST /v1/payment-items/scope-preview` 确认覆盖人数 |
 | 时间窗 | `start_time` ≤ `end_time`；仅 `PUBLISHED` 且在时间窗内可缴 |
-| 状态流转 | `DRAFT → PUBLISHED → CLOSED`；`CLOSED` 不可回退，需新建项目 |
-| 部分缴费 | `allow_partial = 1` 时学生可多次缴纳直至累计达应缴额 |
+| 状态流转 | `DRAFT → PUBLISHED → CLOSED`；`CLOSED` 在截止时间前可「重新上架」回到 `PUBLISHED` |
+| 部分缴费 | `allow_partial = 1` 时学生可分多次缴纳，每次金额自填，累计不得超过应缴额 |
 
 **（2）订单与支付**（状态机，不可跳转）
 
@@ -157,7 +161,8 @@ if (Role.STUDENT.equals(currentUser.getRole())) {
 - 幂等：下单接口要求 Header `Idempotency-Key`，`payment_order.idempotency_key` 建唯一索引，重复请求直接返回原订单；
 - 回调幂等：`transaction_no` 唯一索引 + `UPDATE ... WHERE status = 'PAYING'` 乐观更新，影响行数为 0 视为已处理，直接返回成功；
 - 未支付订单 30 分钟自动关闭（定时任务 `OrderCloseJob`，每 5 分钟扫描一次）；
-- **金额以服务端项目配置为准**，请求体中的金额仅作前端展示，服务端忽略。
+- **金额由服务端校验**：`allow_partial = 1` 的项目可传本次 `amount`（留空表示缴清剩余），服务端校验 `0 < amount ≤ 剩余应缴`；其余项目一律按剩余应缴全额收取，传了不同金额直接拒绝；
+- **金额变化会作废旧单**：同一学生、同一项目已有未支付订单时，若本次金额相同则复用该单，不同则关闭旧单再建新单，避免收银台同时挂两张金额不同的订单。
 
 **（3）对账**
 
@@ -683,8 +688,8 @@ CREATE TABLE payment_item (
     term          VARCHAR(20)     NOT NULL COMMENT '学年学期，如 2026-2027-1',
     amount        DECIMAL(10, 2)  NOT NULL COMMENT '应缴金额（元）',
     allow_partial TINYINT         NOT NULL DEFAULT 0 COMMENT '1允许分次缴纳',
-    target_scope  VARCHAR(20)     NOT NULL DEFAULT 'ALL' COMMENT 'ALL/GRADE/COLLEGE/MAJOR/CUSTOM',
-    scope_value   VARCHAR(1000)            DEFAULT NULL COMMENT '适用范围 JSON 数组',
+    target_scope  VARCHAR(20)     NOT NULL DEFAULT 'ALL' COMMENT 'ALL/COMPOSITE，GRADE/COLLEGE/MAJOR/CUSTOM 为历史值',
+    scope_value   VARCHAR(1000)            DEFAULT NULL COMMENT '适用范围：COMPOSITE 存四维对象，历史为单维度数组',
     start_time    DATETIME        NOT NULL COMMENT '缴费开始时间',
     end_time      DATETIME        NOT NULL COMMENT '缴费截止时间',
     status        VARCHAR(20)     NOT NULL DEFAULT 'DRAFT' COMMENT 'DRAFT/PUBLISHED/CLOSED',
@@ -707,7 +712,7 @@ CREATE TABLE payment_order (
     item_id         BIGINT UNSIGNED NOT NULL COMMENT '缴费项目 payment_item.id',
     amount          DECIMAL(10, 2)  NOT NULL COMMENT '应缴金额快照',
     paid_amount     DECIMAL(10, 2)  NOT NULL DEFAULT 0.00 COMMENT '实缴金额',
-    channel         VARCHAR(20)     NOT NULL DEFAULT 'MOCK' COMMENT 'MOCK/WECHAT/ALIPAY/UNIONPAY/CASH',
+    channel         VARCHAR(20)     NOT NULL DEFAULT 'MOCK' COMMENT '支付渠道，当前仅实现 MOCK',
     status          VARCHAR(20)     NOT NULL DEFAULT 'PENDING'
                     COMMENT 'PENDING/PAYING/PAID/CLOSED/REFUNDED/PARTIAL_REFUND',
     transaction_no  VARCHAR(64)              DEFAULT NULL COMMENT '渠道流水号（回调写入）',
@@ -952,6 +957,38 @@ mysql -u root -p campus_payment -e "SHOW TABLES; SELECT username, role FROM sys_
 
 预期：10 张表；4 个用户（1 ADMIN + 1 FINANCE + 2 STUDENT）；2 个 `PUBLISHED` 项目。
 
+### 7.6 演示数据一键重置（开发/答辩用）
+
+`db/demo-data.sql` 在基础种子之上补了一套可直接演示的业务数据：10 名学生（3 个学院、2 个年级）、5 个不同状态的项目、32 笔订单（已缴 / 待支付 / 已关闭 / 部分退款 / 全额退款）、2 条退款记录、1 个已完成的对账批次（含渠道多账与金额差异两类差异）、5 条通知（含 1 条草稿）。
+
+推荐用脚本执行，它会**先备份、再重建、最后打印财务口径校验**：
+
+```bash
+# 备份 + 重建库表 + 灌入演示数据（需要 pymysql：pip install pymysql）
+python scripts/reset_demo_data.py
+
+# 仅清空业务数据后重灌，保留表结构
+python scripts/reset_demo_data.py --data-only
+
+# 不备份（谨慎）
+python scripts/reset_demo_data.py --no-backup
+```
+
+脚本会顺带用库中真实订单号生成 `docs/samples/对账账单-MOCK-<日期>.csv`，可直接在「对账管理 → 上传账单」中演示匹配（含 1 笔渠道多账、1 笔金额差异）。备份产物写入 `backups/`（已在 `.gitignore` 中排除）。
+
+灌入后的预期口径：**应收 64560.00 / 实收 57320.00 / 欠费 7240.00 / 缴费率 88.79%**，订单 32 笔（已付 27 笔），涉及 10 名学生。
+
+演示账号（密码均为 `123456`）：
+
+| 账号 | 角色 | 场景 |
+|---|---|---|
+| `admin` | 管理员 | 操作日志、用户管理、系统设置、数据字典 |
+| `caiwu01` | 财务 | 看板/项目/订单/对账/报表/通知全流程 |
+| `20230101` | 学生 | 李小明，4 个项目全部缴清 |
+| `20230102` | 学生 | 王小红，住宿费有 600 元部分退款 |
+| `20240102` | 学生 | 林晓彤，学费 5800 元待支付（可演示收银台与选渠道） |
+| `20240201` | 学生 | 黄子轩，教材费下单后已关闭，无待缴订单 |
+
 ---
 
 ## 8. 后端启动
@@ -1002,12 +1039,7 @@ jwt:
 
 payment:
   order-expire-minutes: 30         # 未支付订单超时时间
-  default-channel: MOCK            # MVP 默认模拟支付渠道
-  wechat:
-    app-id: ${WX_APP_ID:}
-    mch-id: ${WX_MCH_ID:}
-    api-key: ${WX_API_KEY:}
-    notify-url: ${WX_NOTIFY_URL:http://localhost:8080/api/v1/pay/callback/wechat}
+  default-channel: MOCK            # 当前仅实现模拟支付渠道
 
 springdoc:
   swagger-ui:
@@ -1258,46 +1290,51 @@ pnpm dev
 
 | 方法 | 路径 | 说明 | 权限 |
 |---|---|---|---|
-| GET | `/v1/payment-items` | 分页查询项目（财务/管理员视角） | FINANCE / ADMIN |
+| GET | `/v1/payment-items` | 分页查询项目（财务视角） | FINANCE |
 | GET | `/v1/payment-items/available` | 当前学生可缴项目 | STUDENT |
-| GET | `/v1/payment-items/{id}` | 项目详情 | 登录 |
-| POST | `/v1/payment-items` | 新建项目（草稿） | FINANCE / ADMIN |
-| PUT | `/v1/payment-items/{id}` | 修改（仅 DRAFT） | FINANCE / ADMIN |
-| POST | `/v1/payment-items/{id}/publish` | 发布 | FINANCE / ADMIN |
-| POST | `/v1/payment-items/{id}/close` | 下架 | FINANCE / ADMIN |
+| GET | `/v1/payment-items/scope-options` | 适用范围下拉项（年级/学院/专业，取自学籍档案） | FINANCE |
+| GET | `/v1/payment-items/scope-students` | 指定名单候选学生（`keyword` 搜索 / `ids` 回显） | FINANCE |
+| POST | `/v1/payment-items/scope-preview` | 适用范围覆盖人数预览（发布前确认能覆盖到学生） | FINANCE |
+| GET | `/v1/payment-items/{id}` | 项目详情 | STUDENT / FINANCE |
+| GET | `/v1/payment-items/{id}/close-preview` | 下架前影响预览 | FINANCE |
+| POST | `/v1/payment-items` | 新建项目（草稿） | FINANCE |
+| PUT | `/v1/payment-items/{id}` | 修改（仅 DRAFT） | FINANCE |
+| POST | `/v1/payment-items/{id}/publish` | 发布 | FINANCE |
+| POST | `/v1/payment-items/{id}/close` | 下架（存在未完成订单时拒绝） | FINANCE |
 
 **订单与支付**
 
 | 方法 | 路径 | 说明 | 权限 |
 |---|---|---|---|
-| POST | `/v1/orders` | 创建订单（需 `Idempotency-Key`） | STUDENT |
-| GET | `/v1/orders` | 订单分页（学生自动过滤本人） | 登录 |
-| GET | `/v1/orders/{orderNo}` | 订单详情 | 本人 / FINANCE / ADMIN |
+| POST | `/v1/orders` | 创建订单（需 `Idempotency-Key`；分次项目可传本次 `amount`） | STUDENT |
+| GET | `/v1/orders` | 订单分页（学生自动过滤本人，财务可查全部） | STUDENT / FINANCE |
+| GET | `/v1/orders/channels` | 收银台可选支付渠道 | 登录 |
+| GET | `/v1/orders/{orderNo}` | 订单详情 | 本人 / FINANCE |
 | POST | `/v1/orders/{orderNo}/pay` | 发起支付，返回支付参数或收银台地址 | STUDENT |
-| POST | `/v1/orders/{orderNo}/close` | 关闭未支付订单 | 本人 / FINANCE / ADMIN |
+| POST | `/v1/orders/{orderNo}/close` | 关闭未支付订单 | 本人 |
 | POST | `/v1/pay/callback/{channel}` | 渠道异步回调（验签） | 匿名 |
-| POST | `/v1/orders/{orderNo}/refund` | 退款 | FINANCE / ADMIN |
+| POST | `/v1/orders/{orderNo}/refund` | 退款 | FINANCE |
 | GET | `/v1/orders/{orderNo}/voucher` | 下载电子缴费凭证（PDF） | 本人 / FINANCE |
 
 **对账**
 
 | 方法 | 路径 | 说明 | 权限 |
 |---|---|---|---|
-| GET | `/v1/reconciliations` | 对账批次分页 | FINANCE / ADMIN |
-| POST | `/v1/reconciliations` | 创建批次并上传账单 CSV | FINANCE / ADMIN |
-| POST | `/v1/reconciliations/{batchNo}/match` | 执行自动匹配 | FINANCE / ADMIN |
-| GET | `/v1/reconciliations/{batchNo}/details` | 差异明细分页（`diffType` 筛选） | FINANCE / ADMIN |
-| PUT | `/v1/reconciliations/details/{id}/handle` | 人工核销 | FINANCE / ADMIN |
+| GET | `/v1/reconciliations` | 对账批次分页 | FINANCE |
+| POST | `/v1/reconciliations` | 创建批次并上传账单 CSV | FINANCE |
+| POST | `/v1/reconciliations/{batchNo}/match` | 执行自动匹配 | FINANCE |
+| GET | `/v1/reconciliations/{batchNo}/details` | 差异明细分页（`diffType` 筛选） | FINANCE |
+| PUT | `/v1/reconciliations/details/{id}/handle` | 人工核销 | FINANCE |
 
 **统计**
 
 | 方法 | 路径 | 说明 | 权限 |
 |---|---|---|---|
-| GET | `/v1/stats/overview` | 总览：应收/实收/欠费率/笔数 | FINANCE / ADMIN |
-| GET | `/v1/stats/by-item` | 按项目统计 | FINANCE / ADMIN |
-| GET | `/v1/stats/by-college` | 按学院统计 | FINANCE / ADMIN |
-| GET | `/v1/stats/trend` | 按日/月趋势 | FINANCE / ADMIN |
-| GET | `/v1/stats/export` | 导出 Excel（EasyExcel 流式） | FINANCE / ADMIN |
+| GET | `/v1/stats/overview` | 总览：应收/实收/欠费率/笔数 | FINANCE |
+| GET | `/v1/stats/by-item` | 按项目统计 | FINANCE |
+| GET | `/v1/stats/by-college` | 按学院统计 | FINANCE |
+| GET | `/v1/stats/trend` | 按日/月趋势 | FINANCE |
+| GET | `/v1/stats/export` | 导出 Excel（EasyExcel 流式） | FINANCE |
 
 **通知**
 
@@ -1306,8 +1343,8 @@ pnpm dev
 | GET | `/v1/notices` | 通知列表（按角色过滤） | 登录 |
 | GET | `/v1/notices/{id}` | 通知详情（学生端自动标记已读） | 登录 |
 | GET | `/v1/notices/unread-count` | 未读数 | 登录 |
-| POST | `/v1/notices` | 创建通知 | FINANCE / ADMIN |
-| POST | `/v1/notices/{id}/publish` | 发布通知 | FINANCE / ADMIN |
+| POST | `/v1/notices` | 创建通知 | FINANCE |
+| POST | `/v1/notices/{id}/publish` | 发布通知 | FINANCE |
 
 **系统管理**
 
@@ -1318,8 +1355,9 @@ pnpm dev
 | PUT | `/v1/users/{id}` | 编辑用户 | ADMIN |
 | PUT | `/v1/users/{id}/status` | 启用/禁用 | ADMIN |
 | PUT | `/v1/users/{id}/reset-password` | 重置密码 | ADMIN |
-| POST | `/v1/students/import` | 学生名单 CSV 导入 | FINANCE / ADMIN |
+| POST | `/v1/students/import` | 学生名单 CSV 导入 | ADMIN |
 | GET | `/v1/logs` | 操作日志分页 | ADMIN |
+| GET | `/v1/system/info` | 系统运行信息（环境/账号规模/渠道状态/参数） | ADMIN |
 
 ### 10.5 接口示例
 
@@ -1638,7 +1676,7 @@ Vue Router 使用 history 模式，Nginx 必须配置 `try_files $uri $uri/ /ind
 
 | 方向 | 说明 |
 |---|---|
-| 支付渠道 | 接入微信/支付宝真实商户号，实现 `WechatChannelAdapter` / `AlipayChannelAdapter`，回调验签与证书管理 |
+| 支付渠道 | 当前仅实现模拟支付渠道（不接真实商户号）；如需接入微信/支付宝，新增 `PaymentChannelAdapter` 实现并补充 `PayChannel` 枚举值即可，无需改动订单与退款逻辑 |
 | 权限模型 | 引入 `sys_role` / `sys_permission` / `role_permission`，支持细粒度 RBAC 与按学院数据范围 |
 | 性能 | Redis 缓存项目与字典；热点统计走预聚合表；订单表按月分区 |
 | 可观测性 | 接入 Prometheus + Grafana，接口耗时与错误率告警 |

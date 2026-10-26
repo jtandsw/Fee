@@ -33,23 +33,42 @@
 
 | 方法 | 路径 | 角色 | 说明 |
 |---|---|---|---|
-| GET | `/?status&category&term&keyword&pageNum&pageSize` | FINANCE/ADMIN | 全量分页（含草稿） |
+| GET | `/?status&category&term&keyword&pageNum&pageSize` | FINANCE | 全量分页（含草稿） |
 | GET | `/available` | 登录用户 | **学生端**：仅 `PUBLISHED` + 时间窗内 + 命中本人适用范围（`JSON_CONTAINS`）。可选 `payFilter=ALL\|UNPAID\|PAID`（默认 ALL）按本人缴费进度过滤；每条附 `paidAmount`（已支付-**已成功退款**）、`remainAmount`、`payStatus`（`UNPAID`/`PARTIAL`/`PAID`） |
-| GET | `/{id}` | 登录用户 | 学生访问非本人范围项目 → `40301` |
-| POST | `/` | FINANCE/ADMIN | 创建后为 `DRAFT`，编号「前缀+年份+4 位序号」 |
-| PUT | `/{id}` | FINANCE/ADMIN | 仅 `DRAFT` 可改，否则 `60006` |
-| POST | `/{id}/publish` | FINANCE/ADMIN | `DRAFT → PUBLISHED`；`startTime` 必须早于 `endTime` |
-| POST | `/{id}/close` | FINANCE/ADMIN | `PUBLISHED → CLOSED`（下架后不可再下单） |
+| GET | `/scope-options` | FINANCE | 适用范围下拉可选项 `{grades, colleges, majors[]}`，全部取自学籍档案（`student`）现存值 |
+| GET | `/scope-students?keyword&ids` | FINANCE | 「指定学生」候选：`keyword` 按学号/姓名模糊匹配（上限 20 条），`ids=1,2` 用于编辑时回显已选 |
+| POST | `/scope-preview` | FINANCE | 传适用范围条件，返回 `{studentCount, text}`；`studentCount=0` 表示发出去没人能看到 |
+| GET | `/{id}` | STUDENT/FINANCE | 学生访问非本人范围项目 → `40301` |
+| POST | `/` | FINANCE | 创建后为 `DRAFT`，编号「前缀+年份+4 位序号」 |
+| PUT | `/{id}` | FINANCE | 仅 `DRAFT` 可改，否则 `60006` |
+| POST | `/{id}/publish` | FINANCE | `DRAFT`/`CLOSED → PUBLISHED`；`endTime` 必须晚于当前时间 |
+| GET | `/{id}/close-preview` | FINANCE | 下架影响预览：已缴人数/笔数/金额、未完成订单数、`canClose` |
+| POST | `/{id}/close` | FINANCE | `PUBLISHED → CLOSED`；存在待支付/支付中订单时拒绝 |
 
-适用范围 `targetScope`：
+适用范围（**多维度组合**，非空维度取交集，全空 = 全校）：
 
-| 值 | `scopeValue` | 含义 |
+```json
+{
+  "scope": {
+    "grades":    ["2023"],
+    "colleges":  ["计算机学院"],
+    "majors":    ["软件工程"],
+    "studentIds": ["12", "15"]
+  }
+}
+```
+
+- 维度之间是 **AND**：上例只覆盖「计算机学院 / 软件工程 / 2023 级」且 id 为 12、15 的学生（后者通常不用同时填）。
+- 落库：`target_scope='COMPOSITE'`，`scope_value` 存上述对象（只写非空维度）；空对象或 `scope` 不传 = `ALL`。
+- 前端不得手填：年级/学院/专业的值来自 `GET /scope-options`，学生来自 `GET /scope-students`。字面与学生档案不一致会导致 `JSON_CONTAINS` 匹配不到。
+- 历史数据格式（`GRADE`/`COLLEGE`/`MAJOR`/`CUSTOM` + JSON 数组）仍兼容读取，`GET /{id}` 会把它们统一翻译成 `scope` 四维度结构；老入参 `{targetScope, scopeValue}` 仍可用，但落库会归一为 `COMPOSITE`。
+
+| 维度 | 取值来源 | 匹配字段 |
 |---|---|---|
-| `ALL` | `[]` | 全体在校生 |
-| `GRADE` | `["2023"]` | 指定年级 |
-| `COLLEGE` | `["计算机学院","外国语学院"]` | 指定学院 |
-| `MAJOR` | `["软件工程"]` | 指定专业 |
-| `CUSTOM` | `["20230101","20230102"]` | 指定学号 |
+| `grades` | `student.grade`（字符串） | 等值 |
+| `colleges` | `student.college` | 等值 |
+| `majors` | `student.major` | 等值 |
+| `studentIds` | `student.id`（**不是学号**） | 等值 |
 
 ## 4. 订单 `/v1/orders`
 

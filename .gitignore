@@ -17,6 +17,7 @@ uploads/
 logs/
 *.log
 backend/uploads/
+backups/
 
 # ---- IDE ----
 .idea/
