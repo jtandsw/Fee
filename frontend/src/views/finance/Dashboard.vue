@@ -26,46 +26,23 @@
         <div ref="trendRef" class="chart"></div>
       </div>
       <div class="card">
-        <h3 class="card-title">按项目实收金额</h3>
+        <div class="card-head">
+          <h3 class="card-title">按项目实收金额</h3>
+          <span class="card-hint">按金额降序，取前 10 项</span>
+        </div>
         <div ref="itemRef" class="chart"></div>
       </div>
-    </div>
-
-    <div class="card">
-      <div class="card-head">
-        <h3 class="card-title">最近订单</h3>
-        <el-link type="primary" @click="router.push('/finance/orders')">查看全部</el-link>
-      </div>
-      <el-table :data="orders" size="small" empty-text="暂无订单">
-        <el-table-column prop="orderNo" label="订单号" min-width="180" />
-        <el-table-column prop="studentName" label="学生" width="100" />
-        <el-table-column prop="itemName" label="缴费项目" min-width="180" show-overflow-tooltip />
-        <el-table-column label="金额" width="120" align="right">
-          <template #default="{ row }"><MoneyText :amount="row.amount" /></template>
-        </el-table-column>
-        <el-table-column label="状态" width="100">
-          <template #default="{ row }"><StatusTag :status="row.status" /></template>
-        </el-table-column>
-        <el-table-column label="创建时间" width="170">
-          <template #default="{ row }">{{ formatDateTime(row.createdAt) }}</template>
-        </el-table-column>
-      </el-table>
     </div>
   </div>
 </template>
 
 <script setup lang="ts">
 import { nextTick, onMounted, onUnmounted, ref } from 'vue'
-import { useRouter } from 'vue-router'
 import * as echarts from 'echarts'
-import MoneyText from '@/components/MoneyText.vue'
-import StatusTag from '@/components/StatusTag.vue'
 import * as statsApi from '@/api/stats'
-import * as orderApi from '@/api/order'
-import { formatAmount, formatDateTime } from '@/utils/format'
-import type { ItemStat, Order, OverviewStat, TrendPoint } from '@/types'
+import { formatAmount } from '@/utils/format'
+import type { ItemStat, OverviewStat, TrendPoint } from '@/types'
 
-const router = useRouter()
 const loading = ref(false)
 const overview = ref<OverviewStat>({
   receivable: '0.00',
@@ -76,7 +53,6 @@ const overview = ref<OverviewStat>({
   paidCount: 0,
   studentCount: 0
 })
-const orders = ref<Order[]>([])
 const trendRef = ref<HTMLDivElement>()
 const itemRef = ref<HTMLDivElement>()
 let trendChart: echarts.ECharts | null = null
@@ -115,32 +91,53 @@ function renderTrend(points: TrendPoint[]): void {
   })
 }
 
+/**
+ * 横向条形图：项目名称放在纵轴，长名称不会互相挤压；
+ * 金额差异大时（如个别项目上千、其余几十），柱尾直接标数值，避免小柱看不清。
+ */
 function renderItems(items: ItemStat[]): void {
   if (!itemRef.value) {
     return
   }
   itemChart = itemChart ?? echarts.init(itemRef.value)
+  const sorted = [...items].sort((a, b) => Number(b.received) - Number(a.received))
   itemChart.setOption({
-    grid: { left: 50, right: 20, top: 30, bottom: 60 },
-    tooltip: { trigger: 'axis' },
-    xAxis: {
-      type: 'category',
-      data: items.map((i) => i.itemName),
-      axisLine: { lineStyle: { color: '#dcdfe6' } },
-      axisLabel: { color: '#909399', interval: 0, width: 90, overflow: 'truncate' }
+    grid: { left: 8, right: 74, top: 8, bottom: 8, containLabel: true },
+    tooltip: {
+      trigger: 'axis',
+      axisPointer: { type: 'shadow' },
+      formatter: (params: any) => {
+        const p = Array.isArray(params) ? params[0] : params
+        return `${p.name}<br/>实收金额：¥${formatAmount(p.value)}`
+      }
     },
-    yAxis: {
+    xAxis: {
       type: 'value',
       splitLine: { lineStyle: { color: '#f0f2f5' } },
       axisLabel: { color: '#909399' }
+    },
+    yAxis: {
+      type: 'category',
+      data: sorted.map((i) => i.itemName),
+      inverse: true,
+      axisLine: { show: false },
+      axisTick: { show: false },
+      axisLabel: { color: '#606266', fontSize: 11, width: 148, overflow: 'truncate' }
     },
     series: [
       {
         name: '实收金额',
         type: 'bar',
-        barMaxWidth: 36,
-        data: items.map((i) => Number(i.received)),
-        itemStyle: { color: '#5b9bff', borderRadius: [6, 6, 0, 0] }
+        barMaxWidth: 18,
+        data: sorted.map((i) => Number(i.received)),
+        itemStyle: { color: '#5b9bff', borderRadius: [0, 4, 4, 0] },
+        label: {
+          show: true,
+          position: 'right',
+          color: '#606266',
+          fontSize: 12,
+          formatter: (p: any) => formatAmount(p.value)
+        }
       }
     ]
   })
@@ -149,17 +146,11 @@ function renderItems(items: ItemStat[]): void {
 async function load(): Promise<void> {
   loading.value = true
   try {
-    const [ov, points, items, page] = await Promise.all([
-      statsApi.overview(),
-      statsApi.trend(),
-      statsApi.byItem(),
-      orderApi.pageOrders({ pageNum: 1, pageSize: 8 })
-    ])
+    const [ov, points, items] = await Promise.all([statsApi.overview(), statsApi.trend(), statsApi.byItem()])
     overview.value = ov
-    orders.value = page.list
     await nextTick()
     renderTrend(points)
-    renderItems(items.slice(0, 8))
+    renderItems(items.slice(0, 10))
   } finally {
     loading.value = false
   }
@@ -205,7 +196,12 @@ onUnmounted(() => {
 
 .card-head {
   display: flex;
-  align-items: center;
+  align-items: baseline;
   justify-content: space-between;
+}
+
+.card-hint {
+  font-size: 12px;
+  color: #909399;
 }
 </style>
