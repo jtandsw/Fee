@@ -19,6 +19,9 @@ public class PaymentItemVO {
     private Integer allowPartial;
     private String targetScope;
     private List<String> scopeValue;
+
+    @Schema(description = "适用范围条件（统一格式，兼容历史数据）")
+    private ScopeVO scope;
     private LocalDateTime startTime;
     private LocalDateTime endTime;
     private String status;

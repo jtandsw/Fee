@@ -43,7 +43,9 @@
           </el-tag>
         </div>
         <div class="item-name">{{ item.itemName }}</div>
-        <div class="item-term muted">{{ item.term }} · {{ TARGET_SCOPE_LABEL[item.targetScope] || item.targetScope }}</div>
+        <div class="item-term muted" :title="`${item.term} · ${item.scope?.text || '全校'}`">
+          {{ item.term }} · {{ item.scope?.text || '全校' }}
+        </div>
         <div class="item-amount">
           <MoneyText :amount="item.amount" />
         </div>
@@ -59,9 +61,9 @@
           type="primary"
           class="pay-btn"
           :loading="payingId === item.id"
-          @click="pay(item)"
+          @click="startPay(item)"
         >
-          {{ item.payStatus === 'PARTIAL' ? `缴剩余 ${formatAmount(item.remainAmount)}` : '立即缴费' }}
+          {{ payButtonText(item) }}
         </el-button>
         <el-button v-else class="pay-btn" disabled>已缴清</el-button>
       </div>
@@ -79,30 +81,34 @@
         @size-change="onSizeChange"
       />
     </div>
+
+    <PartialPayDialog
+      v-model="dialogVisible"
+      :item="dialogItem"
+      :loading="submitting"
+      @confirm="submitFromDialog"
+    />
   </div>
 </template>
 
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
-import { useRouter } from 'vue-router'
-import { ElMessage } from 'element-plus'
 import { Refresh } from '@element-plus/icons-vue'
 import MoneyText from '@/components/MoneyText.vue'
+import PartialPayDialog from '@/components/PartialPayDialog.vue'
+import { useItemPayment } from '@/composables/useItemPayment'
 import * as itemApi from '@/api/item'
-import * as orderApi from '@/api/order'
 import { formatAmount, formatDateTime } from '@/utils/format'
-import { newIdempotencyKey } from '@/utils/idempotency'
-import { CATEGORY_LABEL, PAY_STATUS, TARGET_SCOPE_LABEL } from '@/utils/status'
+import { CATEGORY_LABEL, PAY_STATUS } from '@/utils/status'
 import type { PaymentItem } from '@/types'
 
-const router = useRouter()
+const { payingId, dialogVisible, dialogItem, submitting, startPay, submitFromDialog } = useItemPayment()
 
 const items = ref<PaymentItem[]>([])
 const loading = ref(false)
 const pageNum = ref(1)
 const pageSize = ref(9)
 const total = ref(0)
-const payingId = ref<number | null>(null)
 const payFilter = ref<'ALL' | 'UNPAID' | 'PAID'>('ALL')
 
 const emptyText = computed(() => {
@@ -140,16 +146,14 @@ function onSizeChange(): void {
   load()
 }
 
-async function pay(item: PaymentItem): Promise<void> {
-  payingId.value = item.id
-  try {
-    // 分次缴费时后端按「剩余应缴」自动建单，这里无需传金额
-    const order = await orderApi.createOrder({ itemId: item.id, channel: 'MOCK' }, newIdempotencyKey())
-    ElMessage.success(`订单已创建：${order.orderNo}`)
-    await router.push({ path: '/student/cashier', query: { orderNo: order.orderNo } })
-  } finally {
-    payingId.value = null
+function payButtonText(item: PaymentItem): string {
+  if (item.payStatus === 'PAID') {
+    return '已缴清'
   }
+  if (item.allowPartial === 1) {
+    return item.payStatus === 'PARTIAL' ? '继续缴纳' : '去缴费'
+  }
+  return item.payStatus === 'PARTIAL' ? `缴剩余 ${formatAmount(item.remainAmount)}` : '立即缴费'
 }
 
 onMounted(load)
@@ -228,6 +232,10 @@ onMounted(load)
 
 .item-term {
   margin-top: 4px;
+  /* 适用范围可能是多维度组合（年级 · 学院 · 专业），单行截断避免撑破卡片 */
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .item-amount {

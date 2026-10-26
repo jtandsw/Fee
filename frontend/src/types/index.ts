@@ -39,6 +39,17 @@ export interface PageQuery {
   pageSize?: number
 }
 
+/** 适用范围条件（后端已把历史单一维度数据统一翻译成该结构） */
+export interface ItemScope {
+  grades?: string[]
+  colleges?: string[]
+  majors?: string[]
+  /** 学生 id 列表 */
+  studentIds?: string[]
+  /** 一句话描述，全空为「全校」 */
+  text?: string
+}
+
 export interface PaymentItem {
   id: number
   itemNo: string
@@ -49,6 +60,7 @@ export interface PaymentItem {
   allowPartial: number
   targetScope: string
   scopeValue?: string[] | null
+  scope?: ItemScope | null
   startTime: string
   endTime: string
   status: string
@@ -88,6 +100,8 @@ export interface OrderCreateResult {
   status: string
   expireAt: string
   payUrl: string
+  /** 复用了本人该项目的未支付订单，本次没有新建订单 */
+  reused: boolean
 }
 
 export interface PayResult {

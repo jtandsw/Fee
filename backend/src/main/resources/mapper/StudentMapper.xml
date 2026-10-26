@@ -1,0 +1,76 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.campus.payment.mapper.StudentMapper">
+
+    <!--
+      以下查询服务于「发布缴费项目」的适用范围下拉框：
+      选项一律取自学籍档案现存的真实值，保证 scope_value 与学生档案字面一致
+      （PaymentItemMapper.selectAvailableList 用 JSON_CONTAINS 做等值匹配，差一个字就匹配不上）。
+    -->
+
+    <select id="selectScopeGrades" resultType="java.lang.String">
+        SELECT DISTINCT CAST(grade AS CHAR) AS g
+        FROM student
+        WHERE deleted = 0 AND status = 1
+        ORDER BY g DESC
+    </select>
+
+    <select id="selectScopeColleges" resultType="java.lang.String">
+        SELECT DISTINCT college
+        FROM student
+        WHERE deleted = 0 AND status = 1
+        ORDER BY college
+    </select>
+
+    <select id="selectScopeMajors" resultType="com.campus.payment.vo.MajorOptionVO">
+        SELECT DISTINCT college, major
+        FROM student
+        WHERE deleted = 0 AND status = 1
+        ORDER BY college, major
+    </select>
+
+    <select id="selectScopeStudents" resultType="com.campus.payment.vo.StudentOptionVO">
+        SELECT s.id, s.student_no, u.real_name, s.college, s.major, s.grade
+        FROM student s
+        JOIN sys_user u ON u.id = s.user_id
+        WHERE s.deleted = 0
+          AND s.status = 1
+        <if test="ids != null and ids.size() > 0">
+            AND s.id IN
+            <foreach collection="ids" item="sid" open="(" separator="," close=")">
+                #{sid}
+            </foreach>
+        </if>
+        <if test="keyword != null and keyword != ''">
+            AND (s.student_no LIKE CONCAT('%', #{keyword}, '%')
+                 OR u.real_name LIKE CONCAT('%', #{keyword}, '%'))
+        </if>
+        ORDER BY s.student_no
+        LIMIT #{limit}
+    </select>
+
+    <!-- 适用范围覆盖人数：四个维度取交集，空维度表示不限制 -->
+    <select id="countScopeStudents" resultType="java.lang.Integer">
+        SELECT COUNT(*)
+        FROM student s
+        WHERE s.deleted = 0
+          AND s.status = 1
+        <if test="grades != null and grades.size() > 0">
+            AND CAST(s.grade AS CHAR) IN
+            <foreach collection="grades" item="g" open="(" separator="," close=")">#{g}</foreach>
+        </if>
+        <if test="colleges != null and colleges.size() > 0">
+            AND s.college IN
+            <foreach collection="colleges" item="c" open="(" separator="," close=")">#{c}</foreach>
+        </if>
+        <if test="majors != null and majors.size() > 0">
+            AND s.major IN
+            <foreach collection="majors" item="m" open="(" separator="," close=")">#{m}</foreach>
+        </if>
+        <if test="studentIds != null and studentIds.size() > 0">
+            AND s.id IN
+            <foreach collection="studentIds" item="sid" open="(" separator="," close=")">#{sid}</foreach>
+        </if>
+    </select>
+</mapper>

@@ -12,6 +12,7 @@ import com.campus.payment.dto.ItemPaidDTO;
 import com.campus.payment.dto.ItemQueryDTO;
 import com.campus.payment.dto.PageQuery;
 import com.campus.payment.dto.PaymentItemSaveDTO;
+import com.campus.payment.dto.ScopeDTO;
 import com.campus.payment.entity.PaymentItem;
 import com.campus.payment.entity.Student;
 import com.campus.payment.mapper.PaymentItemMapper;
@@ -21,8 +22,14 @@ import com.campus.payment.security.LoginUser;
 import com.campus.payment.security.SecurityUtils;
 import com.campus.payment.service.PaymentItemService;
 import com.campus.payment.util.NoGenerator;
+import com.campus.payment.util.ScopeRule;
 import com.campus.payment.util.ScopeUtils;
+import com.campus.payment.vo.ClosePreviewVO;
 import com.campus.payment.vo.PaymentItemVO;
+import com.campus.payment.vo.ScopeOptionsVO;
+import com.campus.payment.vo.ScopePreviewVO;
+import com.campus.payment.vo.ScopeVO;
+import com.campus.payment.vo.StudentOptionVO;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
 import org.springframework.beans.BeanUtils;
@@ -38,6 +45,7 @@ import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.stream.Collectors;
 
 @Service
@@ -53,6 +61,32 @@ public class PaymentItemServiceImpl implements PaymentItemService {
     private final StudentMapper studentMapper;
     private final PaymentOrderMapper orderMapper;
     private final ObjectMapper objectMapper;
+
+    /** 指定学生范围时下拉的候选上限，以及关键字最大长度 */
+    private static final int STUDENT_OPTION_LIMIT = 20;
+    private static final int STUDENT_OPTION_MAX_IDS = 200;
+
+    @Override
+    public ScopeOptionsVO scopeOptions() {
+        ScopeOptionsVO vo = new ScopeOptionsVO();
+        vo.setGrades(studentMapper.selectScopeGrades());
+        vo.setColleges(studentMapper.selectScopeColleges());
+        vo.setMajors(studentMapper.selectScopeMajors());
+        return vo;
+    }
+
+    @Override
+    public List<StudentOptionVO> scopeStudents(String keyword, List<Long> ids) {
+        List<Long> safeIds = ids == null ? List.of()
+                : ids.stream().filter(Objects::nonNull).distinct().limit(STUDENT_OPTION_MAX_IDS).toList();
+        String kw = StringUtils.hasText(keyword) ? keyword.trim() : null;
+        if (kw != null && kw.length() > 50) {
+            kw = kw.substring(0, 50);
+        }
+        // 有 ids 时按 ids 回显（回填已选学生）；否则按关键字搜索，未输入关键字则给前 N 条候选
+        int limit = safeIds.isEmpty() ? STUDENT_OPTION_LIMIT : Math.max(safeIds.size(), 1);
+        return studentMapper.selectScopeStudents(kw, safeIds, limit);
+    }
 
     @Override
     public PageResult<PaymentItemVO> page(ItemQueryDTO query) {
@@ -154,8 +188,10 @@ public class PaymentItemServiceImpl implements PaymentItemService {
     @Transactional(rollbackFor = Exception.class)
     public void publish(Long id) {
         PaymentItem item = requireItem(id);
-        if (!ItemStatus.DRAFT.name().equals(item.getStatus())) {
-            throw new BusinessException(ResultCode.ITEM_STATUS_INVALID, "仅草稿状态的项目可发布");
+        // 允许已下架项目恢复上架，避免误下架后不可挽回
+        if (!ItemStatus.DRAFT.name().equals(item.getStatus())
+                && !ItemStatus.CLOSED.name().equals(item.getStatus())) {
+            throw new BusinessException(ResultCode.ITEM_STATUS_INVALID, "仅草稿或已下架的项目可发布");
         }
         if (item.getEndTime() == null || item.getEndTime().isBefore(LocalDateTime.now())) {
             throw new BusinessException(ResultCode.PARAM_INVALID, "缴费截止时间必须晚于当前时间");
@@ -165,11 +201,37 @@ public class PaymentItemServiceImpl implements PaymentItemService {
     }
 
     @Override
+    public ClosePreviewVO closePreview(Long id) {
+        PaymentItem item = requireItem(id);
+        int unfinished = orderMapper.countUnfinishedOrders(id);
+        ClosePreviewVO vo = new ClosePreviewVO();
+        vo.setItemId(item.getId());
+        vo.setItemName(item.getItemName());
+        vo.setPaidOrderCount(orderMapper.countPaidOrders(id));
+        vo.setPaidStudentCount(orderMapper.countPaidStudents(id));
+        vo.setPaidAmount(orderMapper.sumPaidByItem(id).toPlainString());
+        vo.setUnfinishedOrderCount(unfinished);
+        vo.setCanClose(ItemStatus.PUBLISHED.name().equals(item.getStatus()) && unfinished == 0);
+        if (!ItemStatus.PUBLISHED.name().equals(item.getStatus())) {
+            vo.setBlockReason("仅已发布的项目可下架");
+        } else if (unfinished > 0) {
+            vo.setBlockReason("还有 " + unfinished + " 笔待支付 / 支付中的订单，需先处理");
+        }
+        return vo;
+    }
+
+    @Override
     @Transactional(rollbackFor = Exception.class)
     public void close(Long id) {
         PaymentItem item = requireItem(id);
         if (!ItemStatus.PUBLISHED.name().equals(item.getStatus())) {
             throw new BusinessException(ResultCode.ITEM_STATUS_INVALID, "仅已发布的项目可下架");
+        }
+        // 待支付 / 支付中的订单在下架后仍可继续支付，必须先处理，避免「项目已下架仍在收费」
+        int unfinished = orderMapper.countUnfinishedOrders(id);
+        if (unfinished > 0) {
+            throw new BusinessException(ResultCode.ITEM_STATUS_INVALID,
+                    "该项目还有 " + unfinished + " 笔待支付 / 支付中的订单，请先让学生完成支付或关闭订单后再下架");
         }
         item.setStatus(ItemStatus.CLOSED.name());
         itemMapper.updateById(item);
@@ -179,13 +241,7 @@ public class PaymentItemServiceImpl implements PaymentItemService {
         if (PaymentCategory.of(dto.getCategory()) == null) {
             throw new BusinessException(ResultCode.PARAM_INVALID, "缴费类别不正确");
         }
-        TargetScope scope = TargetScope.of(dto.getTargetScope());
-        if (scope == null) {
-            throw new BusinessException(ResultCode.PARAM_INVALID, "适用范围不正确");
-        }
-        if (scope.needScopeValue() && (dto.getScopeValue() == null || dto.getScopeValue().isEmpty())) {
-            throw new BusinessException(ResultCode.PARAM_INVALID, "适用范围需填写具体值");
-        }
+        // 范围条件本身在 resolveScope 中校验并抛错，这里只做基础字段校验
         if (dto.getStartTime() == null || dto.getEndTime() == null
                 || !dto.getStartTime().isBefore(dto.getEndTime())) {
             throw new BusinessException(ResultCode.PARAM_INVALID, "缴费开始时间必须早于截止时间");
@@ -195,18 +251,55 @@ public class PaymentItemServiceImpl implements PaymentItemService {
         }
     }
 
+    /**
+     * 把入参翻译成统一的适用范围规则：
+     * 优先用 {@code scope}（多维度组合），其次兼容老的 {@code targetScope + scopeValue}，都没传视为全校。
+     */
+    private ScopeRule resolveScope(PaymentItemSaveDTO dto) {
+        ScopeDTO scope = dto.getScope();
+        if (scope != null && (notEmpty(scope.getGrades()) || notEmpty(scope.getColleges())
+                || notEmpty(scope.getMajors()) || notEmpty(scope.getStudentIds()))) {
+            return ScopeRule.of(scope.getGrades(), scope.getColleges(), scope.getMajors(), scope.getStudentIds());
+        }
+        if (!StringUtils.hasText(dto.getTargetScope())) {
+            return ScopeRule.empty();
+        }
+        TargetScope legacy = TargetScope.of(dto.getTargetScope());
+        if (legacy == null) {
+            throw new BusinessException(ResultCode.PARAM_INVALID, "适用范围不正确");
+        }
+        if (!legacy.needScopeValue()) {
+            return ScopeRule.empty();
+        }
+        if (!notEmpty(dto.getScopeValue())) {
+            throw new BusinessException(ResultCode.PARAM_INVALID, "适用范围需填写具体值");
+        }
+        return switch (legacy) {
+            case GRADE -> ScopeRule.of(dto.getScopeValue(), null, null, null);
+            case COLLEGE -> ScopeRule.of(null, dto.getScopeValue(), null, null);
+            case MAJOR -> ScopeRule.of(null, null, dto.getScopeValue(), null);
+            case CUSTOM -> ScopeRule.of(null, null, null, dto.getScopeValue());
+            default -> ScopeRule.empty();
+        };
+    }
+
     private void applyDto(PaymentItem item, PaymentItemSaveDTO dto) {
         item.setItemName(dto.getItemName());
         item.setCategory(dto.getCategory());
         item.setTerm(dto.getTerm());
         item.setAmount(dto.getAmount());
         item.setAllowPartial(dto.getAllowPartial());
-        item.setTargetScope(dto.getTargetScope());
-        item.setScopeValue(TargetScope.ALL.name().equals(dto.getTargetScope())
-                ? null : ScopeUtils.toJson(objectMapper, dto.getScopeValue()));
+        ScopeRule rule = resolveScope(dto);
+        // 条件全空 = 全校；否则统一写 COMPOSITE，四维度共存
+        item.setTargetScope(rule.isEmpty() ? TargetScope.ALL.name() : TargetScope.COMPOSITE.name());
+        item.setScopeValue(rule.isEmpty() ? null : rule.toJson(objectMapper));
         item.setStartTime(dto.getStartTime());
         item.setEndTime(dto.getEndTime());
         item.setDescription(dto.getDescription());
+    }
+
+    private static boolean notEmpty(List<String> values) {
+        return values != null && !values.isEmpty();
     }
 
     private void insertWithRetry(PaymentItem item, PaymentCategory category) {
@@ -266,6 +359,28 @@ public class PaymentItemServiceImpl implements PaymentItemService {
         BeanUtils.copyProperties(item, vo);
         List<String> scope = ScopeUtils.parse(objectMapper, item.getScopeValue());
         vo.setScopeValue(scope.isEmpty() ? null : scope);
+
+        // 统一成四维度结构：历史单一维度数据也会被翻译成对应的一个维度，前端只有一套展示与编辑逻辑
+        ScopeRule rule = ScopeRule.of(item.getTargetScope(), item.getScopeValue(), objectMapper);
+        ScopeVO scopeVO = new ScopeVO();
+        scopeVO.setGrades(rule.getGrades());
+        scopeVO.setColleges(rule.getColleges());
+        scopeVO.setMajors(rule.getMajors());
+        scopeVO.setStudentIds(rule.getStudentIds());
+        scopeVO.setText(rule.text());
+        vo.setScope(scopeVO);
+        return vo;
+    }
+
+    @Override
+    public ScopePreviewVO previewScope(ScopeDTO scope) {
+        ScopeRule rule = scope == null ? ScopeRule.empty()
+                : ScopeRule.of(scope.getGrades(), scope.getColleges(), scope.getMajors(), scope.getStudentIds());
+        ScopePreviewVO vo = new ScopePreviewVO();
+        vo.setStudentCount(rule.isEmpty() ? studentMapper.countScopeStudents(null, null, null, null)
+                : studentMapper.countScopeStudents(rule.getGrades(), rule.getColleges(),
+                rule.getMajors(), rule.getStudentIds()));
+        vo.setText(rule.text());
         return vo;
     }
 }

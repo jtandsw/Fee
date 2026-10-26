@@ -4,9 +4,14 @@
 
     <!--
       学生可缴项目：PUBLISHED + 时间窗内 + 命中适用范围。
-      scope_value 为 JSON 数组，约定：
-        GRADE / COLLEGE / MAJOR 存字符串数组，如 ["2023"] / ["计算机学院"]
-        CUSTOM 存学生 id 数组（数字或字符串均可）
+
+      scope_value 两种形态：
+        COMPOSITE（新）：JSON 对象 {"grades":[..],"colleges":[..],"majors":[..],"studentIds":[..]}
+                         非空维度取交集，缺失/空数组表示该维度不限制
+        GRADE / COLLEGE / MAJOR / CUSTOM（历史）：单一维度的 JSON 数组，如 ["2023"]、["计算机学院"]
+
+      参数一律显式转成字符串再交给 JSON 函数：MyBatis 把 Integer 绑成整型时
+      MySQL 会报 "Incorrect type for argument 1 in function json_quote"（错误码 3064）。
     -->
     <select id="selectAvailableList" resultType="com.campus.payment.entity.PaymentItem">
         SELECT i.*
@@ -17,15 +22,24 @@
           AND i.end_time &gt;= NOW()
           AND (
                 i.target_scope = 'ALL'
+                OR (i.target_scope = 'COMPOSITE'
+                    AND (JSON_LENGTH(COALESCE(JSON_EXTRACT(i.scope_value, '$.grades'), JSON_ARRAY())) = 0
+                         OR JSON_CONTAINS(i.scope_value, JSON_QUOTE(CAST(#{grade} AS CHAR)), '$.grades'))
+                    AND (JSON_LENGTH(COALESCE(JSON_EXTRACT(i.scope_value, '$.colleges'), JSON_ARRAY())) = 0
+                         OR JSON_CONTAINS(i.scope_value, JSON_QUOTE(CAST(#{college} AS CHAR)), '$.colleges'))
+                    AND (JSON_LENGTH(COALESCE(JSON_EXTRACT(i.scope_value, '$.majors'), JSON_ARRAY())) = 0
+                         OR JSON_CONTAINS(i.scope_value, JSON_QUOTE(CAST(#{major} AS CHAR)), '$.majors'))
+                    AND (JSON_LENGTH(COALESCE(JSON_EXTRACT(i.scope_value, '$.studentIds'), JSON_ARRAY())) = 0
+                         OR JSON_CONTAINS(i.scope_value, JSON_QUOTE(CAST(#{studentId} AS CHAR)), '$.studentIds')))
                 OR (i.target_scope = 'GRADE'
-                    AND (JSON_CONTAINS(i.scope_value, JSON_QUOTE(#{grade}))
-                         OR JSON_CONTAINS(i.scope_value, CAST(#{grade} AS JSON))))
+                    AND (JSON_CONTAINS(i.scope_value, JSON_QUOTE(CAST(#{grade} AS CHAR)))
+                         OR JSON_CONTAINS(i.scope_value, CAST(CAST(#{grade} AS CHAR) AS JSON))))
                 OR (i.target_scope = 'COLLEGE'
-                    AND JSON_CONTAINS(i.scope_value, JSON_QUOTE(#{college})))
+                    AND JSON_CONTAINS(i.scope_value, JSON_QUOTE(CAST(#{college} AS CHAR))))
                 OR (i.target_scope = 'MAJOR'
-                    AND JSON_CONTAINS(i.scope_value, JSON_QUOTE(#{major})))
+                    AND JSON_CONTAINS(i.scope_value, JSON_QUOTE(CAST(#{major} AS CHAR))))
                 OR (i.target_scope = 'CUSTOM'
-                    AND (JSON_CONTAINS(i.scope_value, CAST(#{studentId} AS JSON))
+                    AND (JSON_CONTAINS(i.scope_value, CAST(CAST(#{studentId} AS CHAR) AS JSON))
                          OR JSON_CONTAINS(i.scope_value, JSON_QUOTE(CAST(#{studentId} AS CHAR)))))
               )
         ORDER BY i.end_time ASC, i.id ASC

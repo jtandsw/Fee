@@ -1,6 +1,7 @@
 package com.campus.payment.dto;
 
 import io.swagger.v3.oas.annotations.media.Schema;
+import jakarta.validation.Valid;
 import jakarta.validation.constraints.DecimalMax;
 import jakarta.validation.constraints.DecimalMin;
 import jakarta.validation.constraints.Digits;
@@ -38,10 +39,15 @@ public class PaymentItemSaveDTO {
     @NotNull(message = "是否允许分次缴纳不能为空")
     private Integer allowPartial;
 
-    @NotBlank(message = "适用范围不能为空")
+    @Schema(description = "兼容字段：老接口的适用范围类型（ALL/GRADE/COLLEGE/MAJOR/CUSTOM）；传了 scope 时无需再传")
     private String targetScope;
 
+    @Schema(description = "兼容字段：老接口的单维度值数组")
     private List<String> scopeValue;
+
+    @Schema(description = "适用范围条件（推荐）：年级/学院/专业/指定学生，可任意组合，全空表示全校")
+    @Valid
+    private ScopeDTO scope;
 
     @NotNull(message = "缴费开始时间不能为空")
     @DateTimeFormat(pattern = "yyyy-MM-dd HH:mm:ss")

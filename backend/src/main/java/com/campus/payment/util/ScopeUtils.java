@@ -11,13 +11,15 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * 适用范围（scope_value JSON 数组）解析与匹配，对应 README 3.2（1）。
+ * 适用范围兼容工具：历史数据是「单一维度 + JSON 数组」，新数据是 {@link ScopeRule} 的组合条件，
+ * 匹配逻辑统一收敛到 {@link ScopeRule#matches}。
  */
 public final class ScopeUtils {
 
     private ScopeUtils() {
     }
 
+    /** 解析历史格式的 JSON 数组（COMPOSITE 的对象格式会返回空列表） */
     public static List<String> parse(ObjectMapper objectMapper, String json) {
         if (json == null || json.isBlank()) {
             return new ArrayList<>();
@@ -39,30 +41,12 @@ public final class ScopeUtils {
     }
 
     /**
-     * 判断学生是否命中项目适用范围。
+     * 判断学生是否命中项目适用范围（年级/学院/专业/指定学生，非空维度取交集）。
      */
     public static boolean matches(ObjectMapper objectMapper, PaymentItem item, Student student) {
-        if (item == null || student == null) {
+        if (item == null) {
             return false;
         }
-        String scope = item.getTargetScope();
-        if ("ALL".equalsIgnoreCase(scope)) {
-            return true;
-        }
-        List<String> values = parse(objectMapper, item.getScopeValue());
-        if (values.isEmpty()) {
-            return false;
-        }
-        return switch (scope == null ? "" : scope.toUpperCase()) {
-            case "GRADE" -> contains(values, String.valueOf(student.getGrade()));
-            case "COLLEGE" -> contains(values, student.getCollege());
-            case "MAJOR" -> contains(values, student.getMajor());
-            case "CUSTOM" -> contains(values, String.valueOf(student.getId()));
-            default -> false;
-        };
-    }
-
-    private static boolean contains(List<String> values, String target) {
-        return target != null && values.stream().anyMatch(v -> target.equalsIgnoreCase(v.trim()));
+        return ScopeRule.of(item.getTargetScope(), item.getScopeValue(), objectMapper).matches(student);
     }
 }
