@@ -167,7 +167,8 @@ public class NoticeServiceImpl implements NoticeService {
     }
 
     private boolean canManage(String role) {
-        return "FINANCE".equals(role) || "ADMIN".equals(role);
+        // 通知属于面向学生的缴费宣传口径，由财务维护；管理员只在收件侧收到定向通知
+        return "FINANCE".equals(role);
     }
 
     private boolean visible(Notice notice, String role) {

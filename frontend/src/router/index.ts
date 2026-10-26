@@ -28,7 +28,7 @@ const routes: RouteRecordRaw[] = [
     path: '/finance',
     component: DefaultLayout,
     redirect: '/finance/dashboard',
-    meta: { roles: ['FINANCE', 'ADMIN'] },
+    meta: { roles: ['FINANCE'] },
     children: [
       { path: 'dashboard', name: 'finance-dashboard', component: () => import('@/views/finance/Dashboard.vue'), meta: { title: '财务看板' } },
       { path: 'items', name: 'finance-items', component: () => import('@/views/finance/ItemManage.vue'), meta: { title: '项目管理' } },
@@ -41,12 +41,13 @@ const routes: RouteRecordRaw[] = [
   {
     path: '/admin',
     component: DefaultLayout,
-    redirect: '/admin/users',
+    redirect: '/admin/logs',
     meta: { roles: ['ADMIN'] },
     children: [
+      { path: 'logs', name: 'admin-logs', component: () => import('@/views/admin/LogList.vue'), meta: { title: '操作日志' } },
       { path: 'users', name: 'admin-users', component: () => import('@/views/admin/UserManage.vue'), meta: { title: '用户管理' } },
       { path: 'dicts', name: 'admin-dicts', component: () => import('@/views/admin/DictManage.vue'), meta: { title: '数据字典' } },
-      { path: 'logs', name: 'admin-logs', component: () => import('@/views/admin/LogList.vue'), meta: { title: '操作日志' } }
+      { path: 'settings', name: 'admin-settings', component: () => import('@/views/admin/SystemSetting.vue'), meta: { title: '系统设置' } }
     ]
   },
   {

@@ -55,5 +55,9 @@ export function homePath(role: string): string {
   if (role === 'STUDENT') {
     return '/student/home'
   }
+  if (role === 'ADMIN') {
+    // 管理员只负责审计与系统事务，不进入财务看板
+    return '/admin/logs'
+  }
   return '/finance/dashboard'
 }

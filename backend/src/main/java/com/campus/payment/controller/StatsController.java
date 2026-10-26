@@ -25,7 +25,7 @@ import java.util.List;
 @RestController
 @RequestMapping("/v1/stats")
 @RequiredArgsConstructor
-@PreAuthorize("hasAnyRole('FINANCE','ADMIN')")
+@PreAuthorize("hasRole('FINANCE')")
 public class StatsController {
 
     private final StatsService statsService;

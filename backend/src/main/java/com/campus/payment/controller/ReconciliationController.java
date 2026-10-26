@@ -32,7 +32,7 @@ import java.time.LocalDate;
 @RestController
 @RequestMapping("/v1/reconciliations")
 @RequiredArgsConstructor
-@PreAuthorize("hasAnyRole('FINANCE','ADMIN')")
+@PreAuthorize("hasRole('FINANCE')")
 public class ReconciliationController {
 
     private final ReconciliationService reconciliationService;

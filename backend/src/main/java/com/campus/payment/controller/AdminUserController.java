@@ -81,7 +81,7 @@ public class AdminUserController {
 
     @Operation(summary = "学生名单 CSV 导入")
     @PostMapping("/students/import")
-    @PreAuthorize("hasAnyRole('FINANCE','ADMIN')")
+    @PreAuthorize("hasRole('ADMIN')")
     @LogOperation(module = "学生", action = "名单导入")
     public Result<ImportResultVO> importStudents(@RequestPart("file") MultipartFile file) {
         return Result.ok(userService.importStudents(file));

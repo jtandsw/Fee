@@ -51,9 +51,10 @@ const financeMenus: MenuItem[] = [
 ]
 
 const adminMenus: MenuItem[] = [
+  { path: '/admin/logs', title: '操作日志', icon: markRaw(List) },
   { path: '/admin/users', title: '用户管理', icon: markRaw(User) },
-  { path: '/admin/dicts', title: '数据字典', icon: markRaw(Setting) },
-  { path: '/admin/logs', title: '操作日志', icon: markRaw(List) }
+  { path: '/admin/settings', title: '系统设置', icon: markRaw(Setting) },
+  { path: '/admin/dicts', title: '数据字典', icon: markRaw(Document) }
 ]
 
 const studentMenus: MenuItem[] = [
@@ -67,7 +68,8 @@ const menus = computed<MenuItem[]>(() => {
     return studentMenus
   }
   if (userStore.role === 'ADMIN') {
-    return [...financeMenus, ...adminMenus]
+    // 管理员不展示任何财务入口，避免误入财务数据页面
+    return adminMenus
   }
   return financeMenus
 })

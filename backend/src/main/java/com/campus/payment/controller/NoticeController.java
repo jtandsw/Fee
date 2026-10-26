@@ -48,7 +48,7 @@ public class NoticeController {
 
     @Operation(summary = "创建通知")
     @PostMapping
-    @PreAuthorize("hasAnyRole('FINANCE','ADMIN')")
+    @PreAuthorize("hasRole('FINANCE')")
     @LogOperation(module = "通知", action = "创建")
     public Result<NoticeVO> create(@Valid @RequestBody NoticeSaveDTO dto) {
         return Result.ok(noticeService.create(dto));
@@ -56,7 +56,7 @@ public class NoticeController {
 
     @Operation(summary = "发布通知")
     @PostMapping("/{id}/publish")
-    @PreAuthorize("hasAnyRole('FINANCE','ADMIN')")
+    @PreAuthorize("hasRole('FINANCE')")
     @LogOperation(module = "通知", action = "发布")
     public Result<Void> publish(@PathVariable Long id) {
         noticeService.publish(id);
